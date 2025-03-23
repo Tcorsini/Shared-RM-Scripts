@@ -1,8 +1,8 @@
 #==============================================================================
-# Sprite_Tile
+# Sprite_Tile v1.1
 #------------------------------------------------------------------------------
 # Author: Timtrack
-# date: 11/03/2025
+# date: 18/03/2025
 #==============================================================================
 
 $imported = {} if $imported.nil?
@@ -15,7 +15,7 @@ $imported["TIM-SpriteTiles"] = true
 # You may create Sprite_Tile that will follow the update on the map display
 # You may create Autotiles with Sprite_AutoTile_Handler
 # To do so, in your Spriteset (or equivalent) do the following to create the autotiles:
-# 
+#
 # Sprite_AutoTile_Handler.new(viewport,filename,posList)
 # with filename the autotile file (you may have as many animation steps as you want)
 # and posList a list of [x,y] coordinates on the map
@@ -23,8 +23,13 @@ $imported["TIM-SpriteTiles"] = true
 # The AutoTile_Handler can be updated with update method to change the animation
 # It must be disposed with the dispose method when unused
 #
-# If you wish to change the autotiles positions, you should dispose and create 
-# a new Sprite_AutoTile_Handler with an updated posList.
+# If you wish to change the autotiles positions, you should dispose and create a new Sprite_AutoTile_Handler
+# with an updated posList.
+#==============================================================================
+# Version History
+#------------------------------------------------------------------------------
+# 11/03/2025 - first version
+# 18/03/2025 - anim speed is no more a constant (except default one)
 #==============================================================================
 # Installation: put it above Main and any other script using it
 #==============================================================================
@@ -33,12 +38,11 @@ $imported["TIM-SpriteTiles"] = true
 
 module TIM_TILE
   TILE_DIM = 32 #the size of the tiles in pixels, should not be changed
-  TEST_FILE = "water_dungeon_a1" #just for debug
   ANIM_SPEED = 6 #the number of frames before changing the pattern of the autotile
 end
 
 #==============================================================================
-# Sprite_Tile: class of sprites that will follow the screen
+# Sprite_Tile: class of sprites that will stay on their cells even when the screen moves
 #==============================================================================
 class Sprite_Tile < Sprite_Base
   include TIM_TILE
@@ -51,7 +55,7 @@ class Sprite_Tile < Sprite_Base
     @map_x = x #position x of the tile on the map
     @map_y = y #position y of the tile on the map
   end
-  
+
   #--------------------------------------------------------------------------
   # override method: update
   #--------------------------------------------------------------------------
@@ -59,7 +63,7 @@ class Sprite_Tile < Sprite_Base
     update_pos
     super
   end
-  
+
   #--------------------------------------------------------------------------
   # new method: update_pos -> will follow the map
   #--------------------------------------------------------------------------
@@ -68,7 +72,7 @@ class Sprite_Tile < Sprite_Base
     self.y = screen_y
     self.z = screen_z
   end
-  
+
   #--------------------------------------------------------------------------
   # new methods: screen_x, screen_y, screen_z
   #--------------------------------------------------------------------------
@@ -95,7 +99,7 @@ class Sprite_SmallAutoTile < Sprite_Tile
     super(viewport,x+0.5*(index%2),y+0.5*(index/2))
     @tx,@ty = get_tile_index(index,neighbors)
   end
-  
+
   #--------------------------------------------------------------------------
   # override method: update -> pattern is calculated by handler class, represents the animation step
   #--------------------------------------------------------------------------
@@ -103,7 +107,7 @@ class Sprite_SmallAutoTile < Sprite_Tile
     update_src_rect(pattern)
     super()
   end
-  
+
   #--------------------------------------------------------------------------
   # new method: get_tile_index -> a x,y position of a 16*16 pixel square in the autotile bitmap
   #--------------------------------------------------------------------------
@@ -118,14 +122,14 @@ class Sprite_SmallAutoTile < Sprite_Tile
     my = 2+index/2 + (index/2 == 0 ? 2*neighbors[1] : 2*(1-neighbors[7]))
     return mx,my
   end
-  
+
   #--------------------------------------------------------------------------
   # new method:  set_bitmap -> bitmap is loaded by the handler class
   #--------------------------------------------------------------------------
   def set_bitmap(bitmap)
     self.bitmap = bitmap
   end
-  
+
   #--------------------------------------------------------------------------
   # new method:  update_src_rect -> chooses the 16*16 square in the bitmap to display
   #--------------------------------------------------------------------------
@@ -145,25 +149,22 @@ class Sprite_AutoTile_Handler
   # override method: initialize
   #--------------------------------------------------------------------------
   #posList is a list of positions [x,y]
-  def initialize(viewport,filename,posList)
+  def initialize(viewport,filename,posList, anim_speed = TIM_TILE::ANIM_SPEED)
     @bitmap = Cache.load_bitmap("",filename)
     @frame_step = 0 #the frame step
-    @pattern = 0 #the pattern id, in [0,@anim_steps[ 
-	#the number of anim frames: 
-	#1 for non-animated autotiles
-	#3 for RPG Maker animated autotiles
-	#can be anything depending on the width of the bitmap
-    @anim_steps = @bitmap.width/(2*TIM_TILE::TILE_DIM) 
+    @pattern = 0 #the pattern id, in [0,@anim_steps[
+    @anim_speed = anim_speed #number of frames before changing animation
+    @anim_steps = @bitmap.width/(2*TIM_TILE::TILE_DIM) #the number of anim frames, 1 for non-animated autotiles, 3 for RPG Maker animated autotiles, can be anything depending on the width of the bitmap
     @sprite_list = [] #stores all the Sprite_SmallAutoTile of the same autotile
     init_sprite_list(viewport,posList)
   end
-  
+
   #--------------------------------------------------------------------------
   # new method: init_sprite_list -> called on initialize
   #--------------------------------------------------------------------------
   def init_sprite_list(viewport,posList)
     #generates a grid of 0 and 1 for tile presence
-    my_map = [0]*($game_map.width*$game_map.height) 
+    my_map = [0]*($game_map.width*$game_map.height)
     for p in posList
       my_map[p[0] + p[1]*$game_map.width] = 1
     end
@@ -185,7 +186,7 @@ class Sprite_AutoTile_Handler
       s.set_bitmap(@bitmap) #links the bitmap to each sprites
     end
   end
-  
+
   #--------------------------------------------------------------------------
   # new method: update -> must be called by a spriteset
   #--------------------------------------------------------------------------
@@ -195,15 +196,15 @@ class Sprite_AutoTile_Handler
       s.update(@pattern)
     end
   end
-  
+
   #--------------------------------------------------------------------------
   # new method: update_anim -> updates the pattern
   #--------------------------------------------------------------------------
   def update_anim
-    @frame_step = (@frame_step+1)%TIM_TILE::ANIM_SPEED
+    @frame_step = (@frame_step+1) % @anim_speed
     @pattern = (@pattern+1) % @anim_steps if @frame_step == 0
   end
-  
+
   #--------------------------------------------------------------------------
   # new method: dispose -> must be called by a spriteset
   #--------------------------------------------------------------------------
@@ -212,5 +213,6 @@ class Sprite_AutoTile_Handler
       s.dispose
     end
     @sprite_list = []
+    #@bitmap.dispose #bitmap is in the cache so I guess there is no need to do this especially if the same bitmap is used somewhere else
   end
 end #Sprite_AutoTile_Handler
