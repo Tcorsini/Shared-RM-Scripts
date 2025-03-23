@@ -2,7 +2,7 @@
 #
 # TBS v0.4 by Timtrack
 # -- Last Updated: 23/03/2025
-# -- Requires:
+# -- Requires: 
 #       -Victor Core Engine v 1.35
 #       -Timtrack's Sprite_Tile v 1.1
 #
@@ -242,7 +242,6 @@ $imported["TIM-TBS"] = true
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # [RPG Maker Scripts]
 # Victor Core Engine
-# Sprite_Tile
 # [TBS] Core
 # [TBS addons] (optionnal)
 # Main
@@ -297,37 +296,7 @@ module TBS
   #============================================================================
   module Vocab
     #Information when placing batlers
-  if true #french
-    module PreBattle
-      Place_Message = "Placez vos unités"
-    end #PreBattle
-    module Commands
-      #Actor Commands
-      Menu_Move = "Se déplacer"
-      Menu_Wait = "Attendre"
-      #Global menu Commands
-      Battle_Option_End_Turn = "Fin du tour"
-      Battle_Option_Conditions =  "Conditions de victoire"
-      Battle_Option_Config = "Options"
-      Battle_Option_Cancel = "Retour"
-    end #Commands
-    #Confirmation window
-    module Confirm
-      Place_Here = "Passer au combat ?"
-      Skip_turn = "Terminer le tour ?"
-      Wait_Here = "Terminer son tour ?"
-      Skill_Here = "Utiliser ici ?"
-      Item_Here="Utiliser l'objet ici ?"
-      Attack_Here = "Attaquer cette cible ?"
-      Move_Here='Se déplacer ici ?'
-      Yes, No = "Oui", "Non"
-    end #Confirm
-    #an array with a value per line to display in the VictoryCond window
-    #you may use message commands here
-    Default_Victory_Cond_Texts = ["Vaincre tous les \\C[1]ennemis\\C[0] !",
-                                 "Au moins un membre de votre",
-                                 "équipe doit survrivre !"]
-  else #English
+  
     module PreBattle
       Place_Message = "Place your units"
     end #PreBattle
@@ -356,8 +325,6 @@ module TBS
     #you may use message commands here
     Default_Victory_Cond_Texts = ["Rout all \\C[1]opponents\\C[0]! At least one",
                                  "of your character must survive!"]
-  end#English
-
   end #Vocab
 
   #============================================================================
