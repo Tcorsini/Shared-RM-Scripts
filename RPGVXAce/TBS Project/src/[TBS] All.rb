@@ -2,7 +2,7 @@
 #
 # TBS v0.4 by Timtrack
 # -- Last Updated: 23/03/2025
-# -- Requires: 
+# -- Requires:
 #       -Victor Core Engine v 1.35
 #       -Timtrack's Sprite_Tile v 1.1
 #
@@ -242,6 +242,7 @@ $imported["TIM-TBS"] = true
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # [RPG Maker Scripts]
 # Victor Core Engine
+# Sprite_Tile
 # [TBS] Core
 # [TBS addons] (optionnal)
 # Main
@@ -296,7 +297,6 @@ module TBS
   #============================================================================
   module Vocab
     #Information when placing batlers
-  
     module PreBattle
       Place_Message = "Place your units"
     end #PreBattle
