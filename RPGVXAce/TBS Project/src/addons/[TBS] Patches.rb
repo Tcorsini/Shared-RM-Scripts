@@ -7,14 +7,15 @@
 #==============================================================================
 
 $imported = {} if $imported.nil?
+raise "TBS PatchHub requires TBS by Timtrack" unless $imported["TIM-TBS"]
 $imported["TIM-TBS-PatchHub"] = true
-raise "TBS PatchHub requires TBS by Timtrack" unless $imported["TIM-TBS"] if $imported["TIM-TBS-PatchHub"]
 
 #==============================================================================
 # �� Updates
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-# 18/02/2025 - Started Script.
-#
+# 18/02/2025: start of script
+# 02/03/2025: core v0.1--0.4 support
+# 28/03/2025: core v0.5 support
 #==============================================================================
 # �� Description
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -56,7 +57,6 @@ raise "TBS PatchHub requires TBS by Timtrack" unless $imported["TIM-TBS"] if $im
 # Victor Core Engine (required for TBS)
 # Yanfly Core Engine (optional)
 # Yanfly Battle Core (optional)
-# Sprite_Tile        (required for TBS)
 # [TBS Core]
 # [TBS addons]
 # Supported scripts (in their relative order, all are optional)
@@ -535,6 +535,7 @@ if $imported["YEA-BattleEngine"]
     #--------------------------------------------------------------------------
     def execute_action(tbs = false)
       @subject.sprite_effect_type = :whiten if YEA::BATTLE::FLASH_WHITE_EFFECT
+      @subject.char.set_direction(TBS.dir_towards(@subject.pos,@subject.current_action.tgt_pos)) if tbs
       use_item(tbs)
       @log_window.wait_and_clear
     end
@@ -611,6 +612,7 @@ if $imported["YEA-BattleEngine"]
       end
       process_casting_animation if $imported["YEA-CastAnimations"]
       targets = tbs ? @subject.current_action.tbs_make_targets : @subject.current_action.make_targets.compact
+      @subject.current_action.call_additional_tbs_effects if tbs
       (tbs ? show_tbs_animation(targets, item.animation_id, @subject.current_action) : show_animation(targets, item.animation_id)) if show_all_animation?(item)
       targets.each {|target|
         if $imported["YEA-TargetManager"]

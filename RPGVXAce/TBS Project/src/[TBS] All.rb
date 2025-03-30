@@ -1,7 +1,7 @@
 #==============================================================================
 #
-# TBS v0.4 by Timtrack
-# -- Last Updated: 23/03/2025
+# TBS v0.5 by Timtrack
+# -- Last Updated: 28/03/2025
 # -- Requires:
 #       -Victor Core Engine v 1.35
 #       -Timtrack's Sprite_Tile v 1.1
@@ -36,10 +36,13 @@ $imported["TIM-TBS"] = true
 # Updates History
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # 11/05/2024: start of project
-# 13/03/2025: v0.1 first single-file version
-# 18/03/2025: v0.2 single file version commented and tested
-# 20/03/2025: v0.3 bug fixes, added full status and win conditions menus
-# 23/03/2025: v0.4 added sprites to show team alliegeance and active units
+# 13/03/2025: v0.1   first single-file version
+# 18/03/2025: v0.2   single file version commented and tested
+# 20/03/2025: v0.3   bug fixes, added full status and win conditions menus
+# 23/03/2025: v0.4   added sprites to show team alliegeance and active units
+# 24/03/2025: v0.4.1 bug fixes (vanilla range, guard confirm and small status window display), calls uniformisation
+# 26/03/2025: v0.4.2 supports interpreter calls for map/events effects in TBS
+# 28/03/2025: v0.5   supports movements event calls and addon [TBS] Event Triggers
 #==============================================================================
 # Features
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -109,7 +112,7 @@ $imported["TIM-TBS"] = true
 #   class Scene_Map < Scene_Base
 #     alias method: pre_terminate
 #   class Game_Interpreter
-#     alias method: screen
+#     alias methods: screen, get_character, command_204, command_236
 #     new methods: disable_tbs, enable_tbs
 #   class Game_System
 #     new attributes: move_color, help_skill_color, attack_skill_color, attack_color, tbs_enabled, turn_mode
@@ -132,7 +135,7 @@ $imported["TIM-TBS"] = true
 #                  friend_status(other), getRange(id,type), getRangeWeapon, genTgt(spellRg),
 #                  genArea(tgt,spellRg), always_hide_view?, hide_view?(other), remove_on_death?,
 #                  screen_x, screen_y, screen_z, init_ai, player_controllable?, skill_rating(skill_id),
-#                  preview_damage(user,item), attack_range?(id,type), has_played?
+#                  preview_damage(user,item), attack_range?(id,type), has_played?, can_cross?, can_cross_ev?(moveRule,dir,event)
 #   class Game_Actor < Game_Battler
 #     alias methods: initialize, set_graphic
 #     override methods: move_rule_id, mmov, getRangeWeapon, screen_x, screen_y, screen_z, can_battle?
@@ -164,16 +167,17 @@ $imported["TIM-TBS"] = true
 #     new methods: setup_old_events, save_map_data, tbs_setup, update_tbs, update_battlers
 #                  setup_tbs_events, tbs_events, battle_event_at?(x,y), in_range?(posList, x1,y1)
 #                  targeted_battlers(posList), occupied_by?(x, y), cost_move(move_rule, x,y,d)
-#                  obstacle_dir?(prev_pos,pos,d), can_see?(bat,source,target)
+#                  obstacle_dir?(prev_pos,pos,d), can_see?(bat,source,target),
+#                  battle_events_at(x,y), battle_events_in(posList)
 #   class Game_BaseItem
 #     reveal attribute: item_id
 #   class Game_Action
 #     new attributes: tgt_pos
 #     new attributes (private): tgt_area, tgt_property
-#     alias methods: set_item, clear
+#     alias methods: set_item, set_skill, clear
 #     new methods: set_target(pos), get_targeted_rel, tbs_make_target_pos, tbs_make_targets(area),
 #                  property_valid?(property), get_tgt_property, item_for_none?, item_for_all?,
-#                  tbs_tgt_valid?, random_target
+#                  tbs_tgt_valid?, random_target, call_additional_tbs_effects
 #   class Bitmap
 #     new method: draw_circle(radius,x0,y0,c)
 #   class Window_Base < Window
@@ -244,7 +248,7 @@ $imported["TIM-TBS"] = true
 # Victor Core Engine
 # Sprite_Tile
 # [TBS] Core
-# [TBS addons] (optionnal)
+# [TBS addons] (optional)
 # Main
 #==============================================================================
 # �� Known Issues/Missing content
@@ -254,7 +258,7 @@ $imported["TIM-TBS"] = true
 # -ais may be stuck if their path to target is always interrupted by battlers
 # -fix the advanced height calculation [see addon TBS Height]
 # -there were in previous tests random crashes/freezes of the game, I did fix them (at least partially)
-#  and haven't encountered them again if you still encounter them, please tell me!
+#  and haven't encountered them again, if you still encounter them, please tell me!
 #  It will probably mean that there are still issues in my code
 #
 # Planned content:
@@ -268,9 +272,8 @@ $imported["TIM-TBS"] = true
 # -push/pull effects [addon]
 # -dammage based on direction [addon]
 # -reaction skills [addon]
-# -events triggers [addon]
 # -more advanced ais [addon]
-# -traps/passive area of effect [addon]
+# -traps/passive area of effect [addon] (can be partially simulated with event triggers)
 #
 # Very low priority addons (assume that I will not work on them but you can design them!):
 # -side-view battles like FE (graphic knowledge plus conflict with reaction skills etc., not something I want to code)
@@ -297,6 +300,37 @@ module TBS
   #============================================================================
   module Vocab
     #Information when placing batlers
+  if true #french
+    module PreBattle
+      Place_Message = "Placez vos unités"
+    end #PreBattle
+    module Commands
+      #Actor Commands
+      Menu_Move = "Se déplacer"
+      Menu_Wait = "Attendre"
+      #Global menu Commands
+      Battle_Option_End_Turn = "Fin du tour"
+      Battle_Option_Conditions =  "Conditions de victoire"
+      Battle_Option_Config = "Options"
+      Battle_Option_Cancel = "Retour"
+    end #Commands
+    #Confirmation window
+    module Confirm
+      Place_Here = "Passer au combat ?"
+      Skip_turn = "Terminer le tour ?"
+      Wait_Here = "Terminer son tour ?"
+      Skill_Here = "Utiliser ici ?"
+      Item_Here="Utiliser l'objet ici ?"
+      Attack_Here = "Attaquer cette cible ?"
+      Move_Here='Se déplacer ici ?'
+      Yes, No = "Oui", "Non"
+    end #Confirm
+    #an array with a value per line to display in the VictoryCond window
+    #you may use message commands here
+    Default_Victory_Cond_Texts = ["Vaincre tous les \\C[1]ennemis\\C[0] !",
+                                 "Au moins un membre de votre",
+                                 "équipe doit survrivre !"]
+  else #English
     module PreBattle
       Place_Message = "Place your units"
     end #PreBattle
@@ -325,6 +359,8 @@ module TBS
     #you may use message commands here
     Default_Victory_Cond_Texts = ["Rout all \\C[1]opponents\\C[0]! At least one",
                                  "of your character must survive!"]
+  end#English
+
   end #Vocab
 
   #============================================================================
@@ -460,7 +496,7 @@ module TBS
   WINDOW_OPACITY = 120 #the opacity of windows during TBS battle, between 0 and 255
   #skip the direction choice of the battler at the end of its turn
   SKIP_DIRECTION_CHOICE = false
-  HIDE_PERFORMED_ACTIONS = false
+  HIDE_PERFORMED_ACTIONS = true
 
   #----------------------------------------------------------------------------
   # Turn Wheel
@@ -685,6 +721,7 @@ module TBS
   # by editing MOVE_NAMES_TO_ID, MOVE_COSTS_TT and MOVE_DATA
   MOVE_TYPES = [:ground,:boat,:ship,:flight]
   #wall is like ground but cannot be crossed by specific units, tall_wall even blocks flying units
+  #do not edit them unless you know what you are doing!
   ALL_MOVE_TYPES = MOVE_TYPES + [:wall,:tall_wall]
 
   #these are constants that should not be changed unless you know what you are doing:
@@ -707,7 +744,7 @@ module TBS
   #moveType, crossAlliesRel, crossNeutralRel, crossEnemyRel
   MOVE_DATA = [
     [:ground,CROSS_ALLIES_DEFAULT,CROSS_GROUND,CROSS_GROUND],
-    [:ground,CROSS_ALL,CROSS_GROUND,CROSS_ALL],
+    [:ground,CROSS_ALL,CROSS_ALL,CROSS_ALL],
     [:ground,CROSS_ALLIES_DEFAULT,CROSS_GROUND,CROSS_GROUND],
     [:boat,CROSS_ALLIES_DEFAULT,CROSS_GROUND,CROSS_GROUND],
     [:ship,CROSS_ALLIES_DEFAULT,CROSS_GROUND,CROSS_GROUND],
@@ -1376,16 +1413,19 @@ module TBS
     end
   end
 
-  self.easy_config('Skills', SKILLS_EASY_CONFIG)
-  self.easy_config('Items', ITEMS_EASY_CONFIG)
-  self.easy_config('Weapons', WEAPONS_EASY_CONFIG)
-  self.easy_config('Armors', ARMORS_EASY_CONFIG)
-  self.easy_config('Enemies', ENEMIES_EASY_CONFIG)
-  self.easy_config('States', STATES_EASY_CONFIG)
-  self.easy_config('Actors', ACTOR_EASY_CONFIG)
-  self.easy_config('Classes', CLASS_EASY_CONFIG)
-  self.easy_config('MapInfos', MAP_EASY_CONFIG)
-  self.easy_config('Troops', TROOP_EASY_CONFIG)
+  def self.on_game_start
+    self.easy_config('Skills', SKILLS_EASY_CONFIG)
+    self.easy_config('Items', ITEMS_EASY_CONFIG)
+    self.easy_config('Weapons', WEAPONS_EASY_CONFIG)
+    self.easy_config('Armors', ARMORS_EASY_CONFIG)
+    self.easy_config('Enemies', ENEMIES_EASY_CONFIG)
+    self.easy_config('States', STATES_EASY_CONFIG)
+    self.easy_config('Actors', ACTOR_EASY_CONFIG)
+    self.easy_config('Classes', CLASS_EASY_CONFIG)
+    self.easy_config('MapInfos', MAP_EASY_CONFIG)
+    self.easy_config('Troops', TROOP_EASY_CONFIG)
+  end
+  self.on_game_start
 end #TBS
 
 #==============================================================================
@@ -1436,7 +1476,8 @@ class Scene_Map < Scene_Base
 end
 
 #============================================================================
-# Game_Interpreter
+# Game_Interpreter -> adds method for tbs activation, allows map interaction
+# during TBS like scrolling, moving events etc.
 #============================================================================
 class Game_Interpreter
   #--------------------------------------------------------------------------
@@ -1456,7 +1497,35 @@ class Game_Interpreter
   def screen
     $game_party.in_battle && $game_system.tbs_enabled? ? $game_map.screen : tbs_screen
   end
-end
+  #--------------------------------------------------------------------------
+  # alias method: get_character -> catch events during battle
+  #--------------------------------------------------------------------------
+  alias tbs_get_character get_character
+  def get_character(param)
+    return tbs_get_character(param) unless SceneManager.scene_is?(Scene_TBS_Battle)
+    return $game_player if param < 0
+    events = same_map? ? $game_map.events : {}
+    events[param > 0 ? param : @event_id]
+  end
+  #--------------------------------------------------------------------------
+  # alias method: command_204 -> scroll map
+  #--------------------------------------------------------------------------
+  alias tbs_command_204 command_204
+  def command_204
+    return tbs_command_204 unless SceneManager.scene_is?(Scene_TBS_Battle)
+    Fiber.yield while $game_map.scrolling?
+    $game_map.start_scroll(@params[0], @params[1], @params[2])
+  end
+  #--------------------------------------------------------------------------
+  # alias method: command_236 -> change_weather
+  #--------------------------------------------------------------------------
+  alias tbs_command_236 command_236
+  def command_236
+    return tbs_command_236 unless SceneManager.scene_is?(Scene_TBS_Battle)
+    screen.change_weather(@params[0], @params[1], @params[2])
+    wait(@params[2]) if @params[3]
+  end
+end #Game_Interpreter
 
 #==============================================================================
 #
@@ -1540,6 +1609,13 @@ end
 #============================================================================
 class Game_Character_TBS < Game_Character
   #--------------------------------------------------------------------------
+  # overload method: initialize
+  #--------------------------------------------------------------------------
+  def initialize(battler)
+    @battler = battler
+    super()
+  end
+  #--------------------------------------------------------------------------
   # override method: init_public_members
   #--------------------------------------------------------------------------
   def init_public_members
@@ -1573,11 +1649,18 @@ class Game_Character_TBS < Game_Character
   end
 
   #--------------------------------------------------------------------------
-  # override method: update ->
+  # override method: update -> walk along the path set when moving
   #--------------------------------------------------------------------------
   def update
     super
-    if @tbs_route.size > 0 and not moving?
+    update_tbs_move
+  end
+
+  #--------------------------------------------------------------------------
+  # new method: update_tbs_move
+  #--------------------------------------------------------------------------
+  def update_tbs_move
+    if @tbs_route.size > 0 and not moving? and not $game_troop.interpreter.running?
       dir = @tbs_route.shift
       instance_eval("move_straight(#{dir})")
     end
@@ -1648,7 +1731,7 @@ class Game_Battler < Game_BattlerBase
     tbs_battler_initialize
     #@mmov = 0
     @spent_mov = 0
-    @char = Game_Character_TBS.new
+    @char = Game_Character_TBS.new(self)
     @team = TBS::TEAMS::TEAM_NEUTRALS
     @tbs_active = false #check if unit is "playable"
     @tbs_battler = false
@@ -1689,7 +1772,6 @@ class Game_Battler < Game_BattlerBase
   def on_battle_start
     #@char.reinitialize
     tbs_on_battle_start
-    #@char = Game_Character_TBS.new
     @spent_mov = 0
     @my_turn = 0
     update_char
@@ -1908,6 +1990,28 @@ class Game_Battler < Game_BattlerBase
   end
 
   #--------------------------------------------------------------------------
+  # new method: can_cross? -> can the battler with the moveRule cross the position
+  # nu_pos from prev_pos through direction dir?
+  #--------------------------------------------------------------------------
+  def can_cross?(moveRule,dir,prev_pos,nu_pos)
+    return false unless TBS.tbs_passable?(prev_pos[0],prev_pos[1],dir,moveRule.travel_mode)
+    return false unless TBS.tbs_passable?(nu_pos[0],nu_pos[1],TBS.reverse_dir(dir),moveRule.travel_mode)
+    battler2 = $game_map.occupied_by?(nu_pos[0],nu_pos[1])
+    return false unless battler2.nil? or can_cross_bat?(moveRule,battler2)
+    evList = $game_map.battle_events_at(nu_pos[0],nu_pos[1])
+    return false if evList.any? {|event| !can_cross_ev?(moveRule,dir,event)}
+    return true
+  end
+
+  #--------------------------------------------------------------------------
+  # new method: can_cross_ev? -> can the battler with the moveRule cross the
+  # battle event? (only called for tbs_events)
+  #--------------------------------------------------------------------------
+  def can_cross_ev?(moveRule,dir,event)
+    return !event.normal_priority?
+  end
+
+  #--------------------------------------------------------------------------
   # new method: can_cross_bat? -> can the battler with the moveRule cross the other_battler?
   #--------------------------------------------------------------------------
   def can_cross_bat?(moveRule,other_battler)
@@ -1925,6 +2029,7 @@ class Game_Battler < Game_BattlerBase
     end
     return false #this should not happen unless other relationships types are defined
   end
+
   #--------------------------------------------------------------------------------------------------------------
   # new method: calc_pos_move -> given a number of move_points, returns 2 hash tables route, cost with keys positions [x,y] that are reachable
   # for any reachable position p, route[p] is an array of directions (2,4,6,8) to go from bat.pos to p and cost is the total cost in move points
@@ -1945,11 +2050,14 @@ class Game_Battler < Game_BattlerBase
       for dir,dx,dy in TEST_DIR   # loop for the four directions
         #posDelta = POS.new(dx,dy)
         nu_pos = (nu_x, nu_y = x + dx, y + dy)#pos + posDelta
+        next unless can_cross?(moveRule,dir,_pos,nu_pos)
         # can battler go to new position ?
-        next unless TBS.tbs_passable?(x,y,dir,moveRule.travel_mode) #can I travael from my tile
-        next unless TBS.tbs_passable?(nu_x,nu_y,TBS.reverse_dir(dir),moveRule.travel_mode)  #can I reach the opposite tile
-        battler2 = $game_map.occupied_by?(nu_x, nu_y)
-        next unless battler2.nil? or can_cross_bat?(moveRule,battler2)
+        #next unless TBS.tbs_passable?(x,y,dir,moveRule.travel_mode) #can I travael from my tile
+        #next unless TBS.tbs_passable?(nu_x,nu_y,TBS.reverse_dir(dir),moveRule.travel_mode)  #can I reach the opposite tile
+        #battler2 = $game_map.occupied_by?(nu_x, nu_y)
+        #next unless battler2.nil? or can_cross_bat?(moveRule,battler2)
+        #evList = $game_map.battle_events_at(x,y)
+        #next if evList.any? {|event| !event.tbs_passable_by?(d,type)}
         nu_cost = c + $game_map.cost_move(moveRule,nu_x,nu_y,dir)
         next if nu_cost > move_distance          # Abort tests if current route cost is bigger than move_range
         old_cost = cost[nu_pos]
@@ -3078,7 +3186,7 @@ class Scene_TBS_Battle < Scene_Base
     @full_status_window.openness = 0
     @full_status_window.set_handler(:cancel, method(:open_actor_command_window))
     @full_status_window.set_handler(:ok,   method(:open_actor_command_window))
-    @window_list.push(@small_status_window)
+    @window_list.push(@full_status_window)
   end
 
   #--------------------------------------------------------------------------
@@ -3334,8 +3442,9 @@ class Scene_TBS_Battle < Scene_Base
   #--------------------------------------------------------------------------
   def on_skill_cancel
     @skill_window.hide
-    @actor_command_window.open
-    @actor_command_window.activate
+    open_actor_command_window
+    #@actor_command_window.open
+    #@actor_command_window.activate
   end
   #--------------------------------------------------------------------------
   # * Item [OK]
@@ -3350,8 +3459,9 @@ class Scene_TBS_Battle < Scene_Base
   #--------------------------------------------------------------------------
   def on_item_cancel
     @item_window.hide
-    @actor_command_window.open
-    @actor_command_window.activate
+    open_actor_command_window
+    #@actor_command_window.open
+    #@actor_command_window.activate
   end
   #--------------------------------------------------------------------------
   # * Event Processing
@@ -3447,6 +3557,7 @@ class Scene_TBS_Battle < Scene_Base
     @subject.use_item(item)
     #refresh_status
     targets = tbs ? @subject.current_action.tbs_make_targets : @subject.current_action.make_targets.compact
+    @subject.current_action.call_additional_tbs_effects if tbs
     tbs ? show_tbs_animation(targets, item.animation_id, @subject.current_action) : show_animation(targets, item.animation_id)
     targets.each {|target| item.repeats.times { invoke_item(target, item) } }
   end
@@ -3631,7 +3742,7 @@ class Scene_TBS_Battle < Scene_Base
   #--------------------------------------------------------------------------
   def disactivate_cursor
     @cursor.active = false
-    @cursor.menu_skill = false
+    #@cursor.menu_skill = false
     @cursor.mode = nil
     @small_status_window.hide
     @small_status_window.battler = nil
@@ -3643,6 +3754,7 @@ class Scene_TBS_Battle < Scene_Base
   def update_cursor
     return unless @cursor.active
     @cursor.update #moves the cursor and updates its internal data
+    @interaction = false #compatibility, a sound will play depending of interaction status
     if Input.trigger?(Input::B) #cancel
       on_cursor_cancel
     elsif Input.trigger?(Input::C) #confirm
@@ -3656,7 +3768,7 @@ class Scene_TBS_Battle < Scene_Base
     elsif Input.repeat?(Input::Z)
       on_cursor_previous
     end
-    if @cursor.has_moved
+    if @cursor.has_moved and @cursor.active #cursor might have been disactivated
       @spriteset.dispose_range(TBS.spriteType(:move)) if @cursor.mode == :select #when selecting battlers
       @cursor.battler.nil? ? @small_status_window.hide : @small_status_window.show
       @small_status_window.battler = @cursor.battler
@@ -3730,7 +3842,8 @@ class Scene_TBS_Battle < Scene_Base
       return
     when :select
       bat = @cursor.battler
-      return Sound.play_buzzer if bat.nil?
+      return Sound.play_buzzer if bat.nil? and not @interaction
+      return if bat.nil?
       if bat.player_controllable? and bat.is_active?
         Sound.play_ok
         @cursor.select_bat(bat)
@@ -3783,28 +3896,34 @@ class Scene_TBS_Battle < Scene_Base
       @party_command_window.open
       @party_command_window.activate
     when :move
-      @cursor.moveto_bat(@cursor.origin_bat)
-      @actor_command_window.open
-      @actor_command_window.activate
+      #@cursor.moveto_bat(@cursor.origin_bat)
+      open_actor_command_window
+      #@actor_command_window.open
+      #@actor_command_window.activate
     when :attack
-      @cursor.moveto_bat(@cursor.origin_bat)
-      @actor_command_window.open
-      @actor_command_window.activate
+      #@cursor.moveto_bat(@cursor.origin_bat)
+      open_actor_command_window
+      #@actor_command_window.open
+      #@actor_command_window.activate
     when :skill
-      @cursor.moveto_bat(@cursor.origin_bat)
+      #@cursor.moveto_bat(@cursor.origin_bat)
       if @cursor.menu_skill
-        @actor_command_window.open
-        @actor_command_window.activate
+        open_actor_command_window
+        #@actor_command_window.open
+        #@actor_command_window.activate
       else
+        @cursor.moveto_bat(@cursor.origin_bat)
         @skill_window.show
         @skill_window.activate
       end
     when :item
-      @cursor.moveto_bat(@cursor.origin_bat)
+      #@cursor.moveto_bat(@cursor.origin_bat)
       if @cursor.menu_skill
-        @actor_command_window.open
-        @actor_command_window.activate
+        open_actor_command_window
+        #@actor_command_window.open
+        #@actor_command_window.activate
       else
+        @cursor.moveto_bat(@cursor.origin_bat)
         @item_window.show
         @item_window.activate
       end
@@ -3884,6 +4003,9 @@ class Scene_TBS_Battle < Scene_Base
   # open_actor_command_window -> when an action was done, go back to the actor list, or ask for end of turn
   #--------------------------------------------------------------------------
   def open_actor_command_window
+    @cursor.menu_skill = false
+    @cursor.moveto_bat(@cursor.origin_bat)
+    @small_status_window.hide
     @full_status_window.close
     @actor_command_window.refresh
     return command_cursor_select unless @cursor.origin_bat.player_controllable?
@@ -4130,7 +4252,7 @@ class Scene_TBS_Battle < Scene_Base
       puts @active_battlers.map{|bat| bat.name}
       for b in @active_battlers
         b.make_actions
-        b.on_turn_start
+        on_turn_start(b)
       end
       @cursor.moveto_bat(@active_battlers[0]) if @active_battlers.size > 0
       command_cursor_select #will activate cursor iff there are active battlers, else will call ai
@@ -4139,7 +4261,12 @@ class Scene_TBS_Battle < Scene_Base
     end
   end
 
-
+  #--------------------------------------------------------------------------
+  # on_turn_start
+  #--------------------------------------------------------------------------
+  def on_turn_start(bat)
+    bat.on_turn_start
+  end
   #--------------------------------------------------------------------------
   # on_turn_end
   #--------------------------------------------------------------------------
@@ -4155,11 +4282,11 @@ class Scene_TBS_Battle < Scene_Base
     BattleManager.turn_start
     @log_window.wait
     @log_window.clear
-    #process_event
+    process_event
     #update_obstacles
     for b in obstacles
       b.make_actions #just in case, but it should not be used
-      b.on_turn_start #activate all obstacles
+      on_turn_start(b) #activate all obstacles
     end
     for b in obstacles
       on_turn_end(b) #disactivate them, simulate parrallel turns just in case
@@ -4398,11 +4525,10 @@ end
 
 module TBS
   #--------------------------------------------------------------------------
-  # new method: tbs_passable? -> return true iff the battler with move_type type can cross the cell
+  # new method: tbs_passable? -> return true iff the battler with move_type type
+  # can cross the cell x,y from direction d?
   #--------------------------------------------------------------------------
   def self.tbs_passable?(x,y,d,type)
-    event = $game_map.battle_event_at?(x,y)
-    return false if event and event.normal_priority?
     case type
     when :ground
       return $game_map.passable?(x,y,d)
@@ -4417,7 +4543,6 @@ module TBS
     end
   end
 end #TBS
-
 
 #============================================================================
 # MoveRule -> stores move cost data and restrictions, used in calc_pos_move
@@ -4787,7 +4912,7 @@ class CastRange
   end
 
   #--------------------------------------------------------------------------
-  # genArea -> returns an array of cells that are inside the range of a spell cast from src
+  # genTargets -> returns an array of cells that are inside the range of a spell cast from src
   #--------------------------------------------------------------------------
   #given src as POS, return a list of reachable position
   def genTargets(src)
@@ -5318,6 +5443,23 @@ class Game_Map
   end
 
   #-------------------------------------------------------------------------
+  # new method: battle_events_at -> return an array of battle_events at x,y
+  #-------------------------------------------------------------------------
+  def battle_events_at(x,y)
+    @battle_events.values.select{|e| e.x == x and e.y == y}
+  end
+
+  #-------------------------------------------------------------------------
+  # new method: battle_events_in -> return an array of battle_events in the range posList
+  #-------------------------------------------------------------------------
+  def battle_events_in(posList)
+    #POS.new(e.x,e.y))
+    #puts @battle_events.size
+    #puts posList.size
+    @battle_events.values.select{|e| in_range?(posList,e.x,e.y)}
+  end
+
+  #-------------------------------------------------------------------------
   # new method: in_range? -> is x,y inside the posList?
   #-------------------------------------------------------------------------
   def in_range?(posList, x1 = x,y1 = y)
@@ -5356,16 +5498,19 @@ class Game_Map
   #define if the current position is an obstacle for spells and ranged attacks
   def obstacle_dir?(prev_pos,pos,d)
     tag = terrain_tag(pos.x,pos.y)
-    return false if TBS::REVEAL_TERRAIN_TAG.include?(tag)
+    tag2 = terrain_tag(prev_pos.x,prev_pos.y)
+    ignore_prev_pos = TBS::REVEAL_TERRAIN_TAG.include?(tag2)
+    ignore_pos = TBS::REVEAL_TERRAIN_TAG.include?(tag)
+    return false if ignore_pos #TBS::REVEAL_TERRAIN_TAG.include?(tag)
     return true if TBS::HIDE_TERRAIN_TAG.include?(tag)
     return false unless TBS::DEFAULT_OBSTACLES_HIDE
     if TBS.is_diagonal?(d)
       d1,d2 = TBS.diagonal_to_pair(d)
-      return true unless (passable?(prev_pos.x, prev_pos.y, d1) and passable?(prev_pos.x, prev_pos.y, d2))
+      return true unless ignore_prev_pos or (passable?(prev_pos.x, prev_pos.y, d1) and passable?(prev_pos.x, prev_pos.y, d2))
       d1,d2 = TBS.diagonal_to_pair(TBS.reverse_dir(d))
-      return true unless (passable?(pos.x, pos.y, d1) and passable?(pos.x, pos.y, d2))
+      return true unless ignore_pos or (passable?(pos.x, pos.y, d1) and passable?(pos.x, pos.y, d2))
     else
-      return true unless (passable?(prev_pos.x, prev_pos.y, d) and passable?(pos.x, pos.y, TBS.reverse_dir(d)))
+      return true unless (ignore_prev_pos or passable?(prev_pos.x, prev_pos.y, d)) and (ignore_pos or passable?(pos.x, pos.y, TBS.reverse_dir(d)))
     end
     return false
   end
@@ -5421,12 +5566,12 @@ class TBS_Cursor
     @active = false
     @pos = POS.new(0,0)
     @range = [] #list of x,y where the cursor may go, relevant for move situations
-    @mode = nil                      #not use yet
-    @battler = nil                   #selected battler
-    @has_moved = false
-    @menu_skill = false
-    @origin_bat = nil #the caster, the battler that is selected
-    @path = TBS_Path.new
+    @mode = nil                      #a value in [:place, :select, :move, :item, :skill, :attack]
+    @battler = nil                   #battler under the cursor, nil if no such battler
+    @has_moved = false               #update cursor data only if its position has changed during this update cycle
+    @menu_skill = false              #boolean, set to true if the skill is an action from the menu, that way, when the cursor is canceled, it goes back to the menu
+    @origin_bat = nil                #the battler that was selected (caster etc.)
+    @path = TBS_Path.new             #path to track the route when selecting moving
     @route_data = {}
     @cost_data = {}
     @area = [] #skill, help_skill, used to display area
@@ -5728,11 +5873,20 @@ class Game_Action
   attr_reader :tgt_pos #an x,y cell refering to the target of the action
 
   #--------------------------------------------------------------------------
+  # alias method: set_skill -> now loads some tgt restriction properties for tbs
+  #--------------------------------------------------------------------------
+  alias tbs_ga_set_skill set_skill
+  def set_skill(skill_id)
+    tbs_ga_set_skill(skill_id)
+    @tgt_property = get_tgt_property #refers to : is the cell empty etc. or other cosntraints
+  end
+
+  #--------------------------------------------------------------------------
   # alias method: set_item -> now loads some tgt restriction properties for tbs
   #--------------------------------------------------------------------------
   alias tbs_ga_set_item set_item
-  def set_item(item)
-    tbs_ga_set_item(item)
+  def set_item(item_id)
+    tbs_ga_set_item(item_id)
     @tgt_property = get_tgt_property #refers to : is the cell empty etc. or other cosntraints
   end
 
@@ -5788,7 +5942,7 @@ class Game_Action
   end
 
   #--------------------------------------------------------------------------
-  # new method: tbs_make_target_pos -> return the list of battlers affected by the area
+  # new method: tbs_make_targets -> return the list of battlers affected by the area
   #--------------------------------------------------------------------------
   def tbs_make_targets(area = @tgt_area)
     #targets = []
@@ -5861,6 +6015,11 @@ class Game_Action
     end
     targets[0]
   end
+
+  #--------------------------------------------------------------------------
+  # new method: call_additional_tbs_effects -> call other effects for fututre compaitiblity
+  #--------------------------------------------------------------------------
+  def call_additional_tbs_effects; end
 end #Game_Action
 
 #==============================================================================
@@ -6595,6 +6754,7 @@ class Sprite_TBS_Cursor < Sprite_Tile
   # MoveTo - Sets the X,Y position of the cursor
   #----------------------------------------------------------------------------
   def moveto(x, y)
+    return if @map_x == x and @map_y == y
     @map_x = x % $game_map.width
     @map_y = y % $game_map.height
     center(x,y)
@@ -6989,27 +7149,35 @@ class Window_TBS_ActorCommand < Window_ActorCommand
   #--------------------------------------------------------------------------
   def make_command_list
     return unless @actor
-    add_move_command unless (TBS::HIDE_PERFORMED_ACTIONS and not @actor.can_move?)
-    add_attack_command unless (TBS::HIDE_PERFORMED_ACTIONS and not (@actor.attack_usable? and @actor.current_action))
-    add_guard_command unless (TBS::HIDE_PERFORMED_ACTIONS and not (@actor.guard_usable? and @actor.current_action))
-    add_skill_commands unless (TBS::HIDE_PERFORMED_ACTIONS and not @actor.current_action)
-    add_item_command unless (TBS::HIDE_PERFORMED_ACTIONS and not @actor.current_action)
+    add_move_command
+    add_attack_command
+    add_guard_command
+    add_skill_commands
+    add_item_command
     add_custom_commands
     add_status_command
     add_wait_command
   end
 
   #--------------------------------------------------------------------------
+  # new method: add_tbs_command -> adds the command unless command conditions
+  # are not met and the tbs option states to hide the command
+  #--------------------------------------------------------------------------
+  def add_command_tbs(name, symbol, enabled = true, ext = nil)
+    add_command(name, symbol, enabled, ext) unless (TBS::HIDE_PERFORMED_ACTIONS and not enabled)
+  end
+
+  #--------------------------------------------------------------------------
   # override method: add_attack_command
   #--------------------------------------------------------------------------
   def add_attack_command
-    add_command(Vocab::attack, :attack, (@actor.attack_usable? and @actor.current_action))
+    add_command_tbs(Vocab::attack, :attack, (@actor.attack_usable? and @actor.current_action))
   end
   #--------------------------------------------------------------------------
   # override method: add_guard_command
   #--------------------------------------------------------------------------
   def add_guard_command
-    add_command(Vocab::guard, :guard, (@actor.guard_usable? and @actor.current_action))
+    add_command_tbs(Vocab::guard, :guard, (@actor.guard_usable? and @actor.current_action))
   end
   #--------------------------------------------------------------------------
   # override method: add_skill_commands
@@ -7017,42 +7185,42 @@ class Window_TBS_ActorCommand < Window_ActorCommand
   def add_skill_commands
     @actor.added_skill_types.sort.each do |stype_id|
       name = $data_system.skill_types[stype_id]
-      add_command(name, :skill, @actor.current_action, stype_id)
+      add_command_tbs(name, :skill, @actor.current_action, stype_id)
     end
   end
   #--------------------------------------------------------------------------
   # override method: add_item_command
   #--------------------------------------------------------------------------
   def add_item_command
-    add_command(Vocab::item, :item, @actor.current_action) unless @actor.enemy?
+    add_command_tbs(Vocab::item, :item, @actor.current_action) unless @actor.enemy?
   end
 
   #--------------------------------------------------------------------------
   # new method: add_move_command
   #--------------------------------------------------------------------------
   def add_move_command
-    add_command(TBS::Vocab::Commands::Menu_Move, :move, @actor.can_move?)
+    add_command_tbs(TBS::Vocab::Commands::Menu_Move, :move, @actor.can_move?)
   end
 
   #--------------------------------------------------------------------------
   # new method: add_status_command
   #--------------------------------------------------------------------------
   def add_status_command
-    add_command(Vocab.status, :status)
+    add_command_tbs(Vocab.status, :status)
   end
 
   #--------------------------------------------------------------------------
   # new method: add_wait_command
   #--------------------------------------------------------------------------
   def add_wait_command
-    add_command(TBS::Vocab::Commands::Menu_Wait, :wait)
+    add_command_tbs(TBS::Vocab::Commands::Menu_Wait, :wait)
   end
 
   #--------------------------------------------------------------------------
   # new method: add_custom_commands
   #--------------------------------------------------------------------------
   def add_custom_commands
-    #add_command("Interact", :interact) if false
+    #add_command_tbs("Interact", :interact) if false
   end
 
   #--------------------------------------------------------------------------
@@ -7067,6 +7235,7 @@ class Window_TBS_ActorCommand < Window_ActorCommand
   #--------------------------------------------------------------------------
   def refresh
     super
+    select(0) if @index >= item_max
     self.height = fitting_height(visible_line_number)
   end
 

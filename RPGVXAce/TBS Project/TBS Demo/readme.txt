@@ -1,5 +1,5 @@
 #===================================================================
-# TBS demo by Timtrack from https://github.com/Tcorsini/Shared-RM-Scripts
+# TBS demo by Timtrack v0.5
 #-------------------------------------------------------------------
 # Description:
 # This is a demo showcasing the scripts I wrote in the past few months
