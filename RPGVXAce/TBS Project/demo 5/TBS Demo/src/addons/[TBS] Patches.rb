@@ -1,7 +1,7 @@
 #==============================================================================
 #
 # �� TBS PatchHub by Timtrack
-# -- Last Updated: 02/04/2025
+# -- Last Updated: 02/03/2025
 # -- Requires: [TBS] by Timtrack
 #
 #==============================================================================
@@ -16,7 +16,6 @@ $imported["TIM-TBS-PatchHub"] = true
 # 18/02/2025: start of script
 # 02/03/2025: core v0.1--0.4 support
 # 28/03/2025: core v0.5 support
-# 02/04/2025: bugfix and core v0.6 support
 #==============================================================================
 # �� Description
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -56,7 +55,6 @@ $imported["TIM-TBS-PatchHub"] = true
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # [RPG Maker Scripts]
 # Victor Core Engine (required for TBS)
-# Sprite_Tile (required for TBS)
 # Yanfly Core Engine (optional)
 # Yanfly Battle Core (optional)
 # [TBS Core]
@@ -210,7 +208,7 @@ if $imported["YEA-BattleEngine"]
       $game_party.on_tbs_battle_start
       $game_troop.on_tbs_battle_start
       for b in SceneManager.scene.obstacles
-        b.on_battle_start
+        b.on_battle_end
       end
       return unless YEA::BATTLE::MSG_ENEMY_APPEARS
       $game_troop.enemy_names.each do |name|
@@ -605,7 +603,6 @@ if $imported["YEA-BattleEngine"]
     # overwrite method: use_item
     #--------------------------------------------------------------------------
     def use_item(tbs)
-      store_action_data(@subject,@subject.current_action)
       item = @subject.current_action.item
       @log_window.display_use_item(@subject, item)
       @subject.use_item(item)

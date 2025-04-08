@@ -1,8 +1,8 @@
 #==============================================================================
-# TBS Event Triggers v1.1
+# TBS Event Triggers
 #------------------------------------------------------------------------------
 # Author: Timtrack
-# date: 03/04/2025
+# date: 29/03/2025
 # Requires: [TBS] by Timtrack
 #==============================================================================
 
@@ -10,12 +10,6 @@ $imported = {} if $imported.nil?
 raise "TBS Event Triggers requires TBS by Timtrack" unless $imported["TIM-TBS"]
 $imported["TIM-TBS-EventTriggers"] = true #set to false if you wish to disable the modifications
 
-#==============================================================================
-# Updates
-#------------------------------------------------------------------------------
-# 29/03/2025: first version
-# 03/04/2025: events are now linked to battlers when calling on_battle_start
-#             instead of tbs_entrance, turn_start events trigger after count update
 #==============================================================================
 # Description
 #------------------------------------------------------------------------------
@@ -97,7 +91,7 @@ $imported["TIM-TBS-EventTriggers"] = true #set to false if you wish to disable t
 #     alias method: setup_battle_event
 #   class Game_Battler < Game_BattlerBase
 #     overwrite method: can_cross_ev?
-#     alias methods: add_new_state, on_battle_start
+#     alias methods: add_new_state, tbs_entrance
 #     new methods: get_event_skills, event_friend_status(event)
 #   class Game_Map
 #     new attributes: global_triggers, waiting_events
@@ -112,11 +106,8 @@ $imported["TIM-TBS-EventTriggers"] = true #set to false if you wish to disable t
 #     new attribute: affected_events
 #     alias methods: set_target, property_valid?, call_additional_tbs_effects
 #     new method: call_events_triggers
-#     overwrite method: event?
-#   module BattleManager
-#     alias method: turn_start
 #   class Scene_TBS_Battler < Scene_Base
-#     alias methods: on_turn_end, on_turn_start,
+#     alias methods: on_turn_end, on_turn_start, turn_start,
 #                    on_cursor_ok, create_tbs_actor_command_window
 #     new method: command_event_skill
 #   class Game_Character_TBS < Game_Character
@@ -144,6 +135,9 @@ module TBS
   #If set to true, will display the skill as if it was from the Skill Menu with
   #icon and cost, else, will only display its name.
   DRAW_SKILL_ICONS = false
+
+  #Modified constant to support new properties:
+  PropertyList += ["event"]
 
   module EVENTS
     DEFAULT_MOVE_TYPE = :wall
@@ -304,29 +298,15 @@ class Game_Battler < Game_BattlerBase
     tbs_te_add_new_state(state_id)
   end
   #--------------------------------------------------------------------------
-  # alias method: on_battle_start -> links the event to the battler
+  # alias method: tbs_entrance -> links the event to the battler
   #--------------------------------------------------------------------------
-  alias trigger_on_battle_start on_battle_start
-  def on_battle_start
-    trigger_on_battle_start
-    evList = $game_map.battle_events_at(pos.x,pos.y).select{|ev| ev.link_on_start? and ev.battler.nil?}
+  alias trigger_tbs_entrance tbs_entrance
+  def tbs_entrance(x,y,team=nil)
+    trigger_tbs_entrance(x,y,team)
+    evList = $game_map.battle_events_at(x,y).select{|ev| ev.link_on_start? and ev.battler.nil?}
     evList.each{|ev| ev.link_to_bat(self)}
   end
 end #Game_Battler
-
-
-#==========================================================================
-# BattleManager -> calls turn_start triggers
-#==========================================================================
-class << BattleManager
-  alias tbs_trigger_bm_turn_start turn_start
-end
-module BattleManager
-  def self.turn_start
-    tbs_trigger_bm_turn_start
-    $game_map.call_triggers(:gts)
-  end
-end
 
 #==========================================================================
 # Scene_TBS_Battle -> calls the right triggers at the right time
@@ -367,6 +347,15 @@ class Scene_TBS_Battle < Scene_Base
       @interaction = true unless evList.empty?
     end
     trigger_on_cursor_ok
+  end
+  #--------------------------------------------------------------------------
+  # alias method: turn_start -> call global turn start triggers
+  #--------------------------------------------------------------------------
+  alias trigger_turn_start turn_start
+  def turn_start
+    $game_map.call_triggers(:gts)
+    process_event
+    trigger_turn_start
   end
   #--------------------------------------------------------------------------
   # alias method: on_turn_start -> call local turn start triggers
@@ -668,12 +657,6 @@ class Game_Action
   def call_events_triggers
     type = @item.is_item? ? :item : :skill
     @affected_events.each{|ev| $game_map.call_tbs_event(ev.triggers[type][@item.item_id],ev.id,[@subject])} if @affected_events
-  end
-  #--------------------------------------------------------------------------
-  # overwrite method: event? -> for properties to check if at least one event is affected
-  #--------------------------------------------------------------------------
-  def event?
-    return @affected_events && !@affected_events.empty?
   end
 end #Game_Action
 

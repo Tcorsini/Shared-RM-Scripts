@@ -1,22 +1,20 @@
 #==============================================================================
 #
 # �� TBS PatchHub by Timtrack
-# -- Last Updated: 02/04/2025
+# -- Last Updated: 02/03/2025
 # -- Requires: [TBS] by Timtrack
 #
 #==============================================================================
 
 $imported = {} if $imported.nil?
-raise "TBS PatchHub requires TBS by Timtrack" unless $imported["TIM-TBS"]
 $imported["TIM-TBS-PatchHub"] = true
+raise "TBS PatchHub requires TBS by Timtrack" unless $imported["TIM-TBS"] if $imported["TIM-TBS-PatchHub"]
 
 #==============================================================================
 # �� Updates
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-# 18/02/2025: start of script
-# 02/03/2025: core v0.1--0.4 support
-# 28/03/2025: core v0.5 support
-# 02/04/2025: bugfix and core v0.6 support
+# 18/02/2025 - Started Script.
+#
 #==============================================================================
 # �� Description
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -56,9 +54,9 @@ $imported["TIM-TBS-PatchHub"] = true
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # [RPG Maker Scripts]
 # Victor Core Engine (required for TBS)
-# Sprite_Tile (required for TBS)
 # Yanfly Core Engine (optional)
 # Yanfly Battle Core (optional)
+# Sprite_Tile        (required for TBS)
 # [TBS Core]
 # [TBS addons]
 # Supported scripts (in their relative order, all are optional)
@@ -210,7 +208,7 @@ if $imported["YEA-BattleEngine"]
       $game_party.on_tbs_battle_start
       $game_troop.on_tbs_battle_start
       for b in SceneManager.scene.obstacles
-        b.on_battle_start
+        b.on_battle_end
       end
       return unless YEA::BATTLE::MSG_ENEMY_APPEARS
       $game_troop.enemy_names.each do |name|
@@ -537,7 +535,6 @@ if $imported["YEA-BattleEngine"]
     #--------------------------------------------------------------------------
     def execute_action(tbs = false)
       @subject.sprite_effect_type = :whiten if YEA::BATTLE::FLASH_WHITE_EFFECT
-      @subject.char.set_direction(TBS.dir_towards(@subject.pos,@subject.current_action.tgt_pos)) if tbs
       use_item(tbs)
       @log_window.wait_and_clear
     end
@@ -605,7 +602,6 @@ if $imported["YEA-BattleEngine"]
     # overwrite method: use_item
     #--------------------------------------------------------------------------
     def use_item(tbs)
-      store_action_data(@subject,@subject.current_action)
       item = @subject.current_action.item
       @log_window.display_use_item(@subject, item)
       @subject.use_item(item)
@@ -615,7 +611,6 @@ if $imported["YEA-BattleEngine"]
       end
       process_casting_animation if $imported["YEA-CastAnimations"]
       targets = tbs ? @subject.current_action.tbs_make_targets : @subject.current_action.make_targets.compact
-      @subject.current_action.call_additional_tbs_effects if tbs
       (tbs ? show_tbs_animation(targets, item.animation_id, @subject.current_action) : show_animation(targets, item.animation_id)) if show_all_animation?(item)
       targets.each {|target|
         if $imported["YEA-TargetManager"]
