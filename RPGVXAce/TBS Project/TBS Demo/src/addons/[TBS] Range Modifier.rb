@@ -46,7 +46,7 @@ module TBS
   end
 
   def self.constant_range(id,type)
-    return ((type == :skill and $data_skills[id].constant_range) or (type == :item and $data_items[id].constant_range))
+    return ((type == :skill && $data_skills[id].constant_range) || (type == :item && $data_items[id].constant_range))
   end
 
   if $imported["TIM-HiddenSkillTypes"]
@@ -187,7 +187,7 @@ if $imported["TIM-TBS-RangeModifier"]
     def getRange(id,type)
       spellRng = super(id,type)
       return spellRng if TBS.constant_range(id,type)
-      return change_range_weapon(spellRng) if type == :skill and id == attack_skill_id
+      return change_range_weapon(spellRng) if type == :skill && id == attack_skill_id
       #$data_actors,$data_classes,$data_weapons,$data_armors
       spellRng = TBS.change_range_mod(id,type,spellRng, $data_actors[@actor_id])
       spellRng = TBS.change_range_mod(id,type,spellRng, $data_classes[@class_id])
@@ -233,7 +233,7 @@ if $imported["TIM-TBS-RangeModifier"]
     def getRange(id,type)
       spellRng = super(id,type)
       return spellRng if TBS.constant_range(id,type)
-      return change_range_weapon(spellRng) if type == :skill and id == attack_skill_id
+      return change_range_weapon(spellRng) if type == :skill && id == attack_skill_id
       spellRng = TBS.change_range_mod(id,type,spellRng, $data_enemies[@enemy_id])
       for s_id in @states
         spellRng = TBS.change_range_mod(id,type,spellRng, $data_states[s_id])

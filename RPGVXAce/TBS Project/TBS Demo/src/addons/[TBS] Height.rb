@@ -2,7 +2,7 @@
 # TBS Height
 #------------------------------------------------------------------------------
 # Author: Timtrack
-# date: 24/02/2025
+# date: 09/04/2025
 # Requires: [TBS] by Timtrack
 #==============================================================================
 
@@ -10,6 +10,11 @@ $imported = {} if $imported.nil?
 $imported["TIM-TBS-Height"] = false #set to false if you wish to disable the modifications
 raise "TBS Height requires TBS by Timtrack" unless $imported["TIM-TBS"] if $imported["TIM-TBS-Height"]
 
+#==============================================================================
+# Updates
+#------------------------------------------------------------------------------
+# 24/02/2025: first version
+# 09/04/2025: code fix
 #==============================================================================
 # Description
 #------------------------------------------------------------------------------
@@ -89,7 +94,7 @@ if $imported["TIM-TBS-Height"]
     #--------------------------------------------------------------------------
     class <<self; alias tbs_height_passable? tbs_passable?; end
     def self.tbs_passable?(x,y,d,type)
-      return (tbs_height_passable?(x,y,d,type) and $game_map.tbs_height([x,y]) <= TBS_HEIGHT::MAX_HEIGHT)
+      return (tbs_height_passable?(x,y,d,type) && $game_map.tbs_height([x,y]) <= TBS_HEIGHT::MAX_HEIGHT)
     end
   end
 
@@ -233,10 +238,10 @@ if $imported["TIM-TBS-Height"]
         p = posList[i]
         if TBS::BATTLER_HIDE #this feature is still used
           bat2 = occupied_by?(p.x,p.y)
-          if (not bat2.nil? and bat2.hide_view?(bat))
+          if (bat2 && bat2.hide_view?(bat))
             prop = height_property(p,bat2)
             delta = prop[2] - max_h
-            if delta > obstacle_h and prop[1] - max_h <= obstacle_h
+            if delta > obstacle_h && (prop[1] - max_h <= obstacle_h)
               obstacle_h = delta
               return false if prop[2] >= tgt_prop[2]
             end
@@ -309,9 +314,7 @@ if $imported["TIM-TBS-Height"]
       #value of the function y = f(x) = ax + b
       #then what matters is for x barrier in [sx,tx] there are ys that changes as integers
       #same for y
-      if dx == 0 and dy == 0
-        return l, dirs, dist
-      end
+      return l, dirs, dist if dx == 0 && dy == 0
       #diagonal case
       lx = dx < 0 ? -1 : 1
       ly = dy < 0 ? -1 : 1
@@ -346,7 +349,7 @@ if $imported["TIM-TBS-Height"]
       iy = 0
       x = sx #previous
       y = sy
-      while ix < xrange.size or iy < yrange.size
+      while ix < xrange.size || iy < yrange.size
         x1 = sx #considered position
         y1 = sy
         if ix < xrange.size
@@ -382,7 +385,7 @@ if $imported["TIM-TBS-Height"]
         abscisse = (source - POS.new(x1,y1)).math_norm
         x1 = x1.round()
         y1 = y1.round()
-        if x != x1 or y != y1
+        if x != x1 || y != y1
           pos = POS.new(x1,y1) #only an integer matters
           x = x1
           y = y1

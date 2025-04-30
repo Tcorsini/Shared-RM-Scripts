@@ -5,6 +5,7 @@
 #------------------------------------------------------------------------------
 # Author : Timtrack
 # date : 16/11/2019
+# modified in 29/04/2025 for code clean
 #------------------------------------------------------------------------------
 #begin
 #Frenglish :
@@ -60,11 +61,6 @@ module Item_Selection
     6 => :all, #any object
   }
   
-  #ITEM_CUSTOM_STRING = {
-  #  :mana_drink => "mana drink",
-  #  :ration => "ration"
-  #}
-  
   #var where the type of the objects displayed is stored
   ITEM_CLASS_VARIABLE = 100
   #if switch true, then default (only selectable items) else any item is selectable
@@ -76,35 +72,40 @@ module Item_Selection
   #var where the type of the selected object is stored
   #stores 0 if item, 1 if weapon, 2 if armor
   ITEM_SELECTED_CLASS_VARIABLE = 99
-end
-  
+end #Item_Selection
 
-#--------------------------------------------------------------------------
-# class Window_KeyItem overriding
-# methods changed : update_placement, enable?(item), include?(item), on_ok
-#--------------------------------------------------------------------------
-
+#============================================================================
+# Window_KeyItem
+#============================================================================
 class Window_KeyItem < Window_ItemList
   include Item_Selection
-  #when opening the window, choose beforehand which items selecting
-  alias update_placement_itemSelection update_placement
+  #--------------------------------------------------------------------------
+  # alias method: update_placement -> when opening the window, 
+  # choose beforehand which items selecting
+  #--------------------------------------------------------------------------
+  alias update_placement_item_selection update_placement
   def update_placement
     self.category = ITEM_SELECTION_CLASS[$game_variables[ITEM_CLASS_VARIABLE]]
-    update_placement_itemSelection
+    update_placement_item_selection
   end
   
-  #when selecting an item, set if any item can be chosen or only the usable
-  alias enable_itemSelection enable?
+  #--------------------------------------------------------------------------
+  # alias method: enable? -> when selecting an item,
+  # set if any item can be chosen or only the usable
+  #--------------------------------------------------------------------------
+  alias enable_item_selection enable?
   def enable?(item)
     if $game_switches[ITEM_SELECTION_SWITCH]
       return true
     else
-      enable_itemSelection(item)
+      enable_item_selection(item)
     end
   end
   
-  #when opening the windows, sets which items are visible
-  alias include_itemSelection include?
+  #--------------------------------------------------------------------------
+  # alias method: include? -> when opening the windows, sets which items are visible
+  #--------------------------------------------------------------------------
+  alias include_item_selection include?
   def include?(item)
     case @category
     when :key_and_items
@@ -114,30 +115,29 @@ class Window_KeyItem < Window_ItemList
     when :all
       return true
     else
-      include_itemSelection(item)
+      include_item_selection(item)
     end
   end
-  
-  #when the item is selected, stores if chosen, the type of the item
-  alias on_ok_itemSelection on_ok
+
+  #--------------------------------------------------------------------------
+  # alias method: on_ok -> when the item is selected, stores if chosen, 
+  # the type of the item
+  #--------------------------------------------------------------------------
+  alias on_ok_item_selection on_ok
   def on_ok
     if ITEM_SELECTED_RETURN_CLASS
       result = item ? item_class_value(item) : 0
       $game_variables[ITEM_SELECTED_CLASS_VARIABLE] = result
     end
-    on_ok_itemSelection
+    on_ok_item_selection
   end
   
-  #determines a value for the type of the item
+  #--------------------------------------------------------------------------
+  # new method: item_class_value -> determines a value for the type of the item
+  #--------------------------------------------------------------------------
   def item_class_value(item)
-    if item.is_a?(RPG::Item)
-      return 0 #item
-    else 
-      if item.is_a?(RPG::Weapon)
-        return 1 #weapon
-      else
-        return 2 #armor
-      end
-    end
+    return 0 if item.is_a?(RPG::Item)
+    return 1 if item.is_a?(RPG::Weapon)
+    return 2 #armor
   end
-end
+end #Window_KeyItem

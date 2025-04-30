@@ -1,7 +1,7 @@
 #==============================================================================
 #
 # �� TBS PatchHub by Timtrack
-# -- Last Updated: 02/04/2025
+# -- Last Updated: 09/04/2025
 # -- Requires: [TBS] by Timtrack
 #
 #==============================================================================
@@ -17,6 +17,7 @@ $imported["TIM-TBS-PatchHub"] = true
 # 02/03/2025: core v0.1--0.4 support
 # 28/03/2025: core v0.5 support
 # 02/04/2025: bugfix and core v0.6 support
+# 09/04/2025: YEA System options linked to v0.7 addon option menu
 #==============================================================================
 # �� Description
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -34,10 +35,10 @@ $imported["TIM-TBS-PatchHub"] = true
 # - YEA Core Engine v1.09
 # - YEA Battle Core v1.22
 # - YEA Enemy HP Bars v1.10
+# - YEA System Options v1.00
 # TODO: check if the patch works with:
 # - YEA Lunatic States v1.02
 # - YEA Skill Restrictions v1.02
-# - YEA System Options v1.00
 # Unsupported:
 # - YEA Instant Cast: TBS actions are already instants
 # - GTBS and other battle systems overhauls are not compatible
@@ -384,8 +385,8 @@ if $imported["YEA-BattleEngine"]
     alias tbs_patch_can_collapse? can_collapse?
     def can_collapse?
       return false unless dead?
-      return true if actor? and not SceneManager.scene_is?(Scene_TBS_Battle)
-      return false unless sprite and sprite.battler_visible
+      return true if actor? && !SceneManager.scene_is?(Scene_TBS_Battle)
+      return false unless sprite && sprite.battler_visible
       array = [:collapse, :boss_collapse, :instant_collapse]
       return false if array.include?(sprite.effect_type)
       return true
@@ -702,7 +703,7 @@ if $imported["YEA-VictoryAftermath"]
     # overwrite method: gain_exp
     #--------------------------------------------------------------------------
     def gain_exp(exp)
-      enabled = !(SceneManager.scene_is?(Scene_TBS_Battle) or SceneManager.scene_is?(Scene_Battle))
+      enabled = !(SceneManager.scene_is?(Scene_TBS_Battle) || SceneManager.scene_is?(Scene_Battle))
       change_exp(self.exp + (exp * final_exp_rate).to_i, enabled)
     end
   end
@@ -884,8 +885,126 @@ end #YEA-SkillRestrictions
 # YEA - System Options patch
 #==============================================================================
 # Animations displayed during TBS Battle are now hidden if the option is chosen
+# The animation and sound options are now linked to the option menu too
 #==============================================================================
 if $imported["YEA-SystemOptions"]
+if $imported["TIM-TBS-Settings"]
+  class << TBS::Options
+    alias tbs_yea_patch_get_value get_value
+    alias tbs_yea_patch_set_value set_value
+    #alias tbs_bm_make_action_order make_action_order
+  end
+  module TBS
+    module Options
+      SOUND_SYMB = [:volume_bgm,:volume_bgs,:volume_sfx]
+      ADDED_SYMBS = [:animations] + SOUND_SYMB
+      COMMANDS = ADDED_SYMBS + [:blank] + COMMANDS
+      BOOLEAN_COMMANDS += [:animations]#ADDED_SYMBS
+      #--------------------------------------------------------------------------
+      # new method: yea to tbs command_vocab
+      #--------------------------------------------------------------------------
+      def self.yea_to_tbs_cmd(yea_cmd)
+        l = []
+        l.push(yea_cmd[0])
+        l2 = [yea_cmd[1],yea_cmd[2]]
+        l.push(l2)
+        l.push(yea_cmd[3])
+        return l
+      end
+      #--------------------------------------------------------------------------
+      # operation: push the commands from yanfly settings, they are converted
+      # into tbs format [name,[options],description]
+      #--------------------------------------------------------------------------
+      for s in ADDED_SYMBS
+        COMMAND_VOCAB[s] = yea_to_tbs_cmd(YEA::SYSTEM::COMMAND_VOCAB[s])
+      end
+      #--------------------------------------------------------------------------
+      # alias method: get_value
+      #--------------------------------------------------------------------------
+      def self.get_value(symb)
+        return tbs_yea_patch_get_value(symb) unless SOUND_SYMB.include?(symb)
+        rate = 0
+        case symb
+        when :volume_bgm
+          rate = $game_system.volume(:bgm)
+        when :volume_bgs
+          rate = $game_system.volume(:bgs)
+        when :volume_sfx
+          rate = $game_system.volume(:sfx)
+        end
+        return rate
+      end
+
+      #--------------------------------------------------------------------------
+      # alias method: set_value
+      #--------------------------------------------------------------------------
+      def self.set_value(symb,v)
+        return tbs_yea_patch_set_value(symb,v) unless SOUND_SYMB.include?(symb)
+        type = nil
+        case symb
+        when :volume_bgm
+          type = :bgm
+        when :volume_bgs
+          type = :bgs
+        when :volume_sfx
+          type = :sfx
+        end
+        $game_system.set_volume(type, v)
+      end
+    end #Options
+  end #TBS
+
+  class Window_TBS_Options < Window_Command
+    #--------------------------------------------------------------------------
+    # new method: draw_volume
+    #--------------------------------------------------------------------------
+    def draw_volume(rect, index, symbol)
+      name = @list[index][:name]
+      draw_text(0, rect.y, contents.width/2, line_height, name, 1)
+      #---
+      dx = contents.width / 2
+      rate = @my_data[symbol]#TBS::Options.get_value(symbol)
+      colour1 = text_color(YEA::SYSTEM::COMMAND_VOCAB[symbol][1])
+      colour2 = text_color(YEA::SYSTEM::COMMAND_VOCAB[symbol][2])
+      value = sprintf("%d%%", rate)
+      rate *= 0.01
+      draw_gauge(dx, rect.y, contents.width - dx - 48, rate, colour1, colour2)
+      draw_text(dx, rect.y, contents.width - dx - 48, line_height, value, 2)
+    end
+    #--------------------------------------------------------------------------
+    # alias method: cursor_change
+    #--------------------------------------------------------------------------
+    alias tbs_yea_cursor_change cursor_change
+    def cursor_change(direction)
+      return change_volume(direction) if TBS::Options::SOUND_SYMB.include?(current_symbol)
+      tbs_yea_cursor_change(direction)
+    end
+    #--------------------------------------------------------------------------
+    # new method: change_volume
+    #--------------------------------------------------------------------------
+    def change_volume(direction)
+      Sound.play_cursor
+      value = direction == :left ? -1 : 1
+      value *= 10 if Input.press?(:A)
+      v = @my_data[current_symbol] + value
+      v = [[v, 0].max, 100].min
+      @my_data[current_symbol] = v
+      draw_item(index)
+    end
+    #--------------------------------------------------------------------------
+    # alias method: draw_item
+    #--------------------------------------------------------------------------
+    alias tbs_yea_draw_item draw_item
+    def draw_item(index)
+      return tbs_yea_draw_item(index) unless TBS::Options::SOUND_SYMB.include?(@list[index][:symbol])
+      reset_font_settings
+      rect = item_rect(index)
+      contents.clear_rect(rect)
+      draw_volume(rect, index, @list[index][:symbol])
+    end
+  end #Window_TBS_Options
+end #$imported["TIM-TBS-Settings"]
+
   class Scene_TBS_Battle < Scene_Base
     #--------------------------------------------------------------------------
     # alias method: show_fast?
@@ -922,7 +1041,7 @@ end #YEA-System Options
 #==============================================================================
 # HP bars will display in TBS battle for both actors and enemies
 #==============================================================================
-if $imported["YEA-EnemyHPBars"] and $imported["YEA-BattleEngine"]
+if $imported["YEA-EnemyHPBars"] && $imported["YEA-BattleEngine"]
   class Sprite_Character_TBS < Sprite_Character
     #--------------------------------------------------------------------------
     # alias method: initialize
@@ -957,7 +1076,7 @@ if $imported["YEA-EnemyHPBars"] and $imported["YEA-BattleEngine"]
     def create_enemy_gauges
       return if @battler.nil?
       #return if @battler.actor?
-      return if @battler.enemy? and not @battler.enemy.show_gauge
+      return if @battler.enemy? && !@battler.enemy.show_gauge
       @back_gauge_viewport = Enemy_HP_Gauge_Viewport.new(@battler, self, :back)
       @hp_gauge_viewport = Enemy_HP_Gauge_Viewport.new(@battler, self, :hp)
     end
@@ -994,7 +1113,7 @@ if $imported["YEA-EnemyHPBars"] and $imported["YEA-BattleEngine"]
     alias game_battlerbase_refresh_tbs_ehpb refresh
     def refresh
       game_battlerbase_refresh_tbs_ehpb
-      sprite.update_enemy_gauge_value if SceneManager.scene_is?(Scene_TBS_Battle) and sprite
+      sprite.update_enemy_gauge_value if SceneManager.scene_is?(Scene_TBS_Battle) && sprite
     end
   end # Game_BattlerBase
 
@@ -1054,28 +1173,8 @@ if $imported["YEA-EnemyHPBars"] and $imported["YEA-BattleEngine"]
     #--------------------------------------------------------------------------
     alias tbs_gauge_visible? gauge_visible?
     def gauge_visible?
-      return true if tbs_gauge_visible? #unless SceneManager.scene_is?(Scene_TBS_Battle)
-      if SceneManager.scene_is?(Scene_TBS_Battle)
-        return false if @battler.dead?
-        return SceneManager.scene.battlers_in_area.include?(@battler)
-      end
-      #update_original_hide
-      #return false if @original_hide
-      #return false if case_original_hide?
-      #return true if @visible_counter > 0
-      #return true if @gauge_width != @target_gauge_width
-      #if SceneManager.scene_is?(Scene_Battle)
-      #return false if SceneManager.scene.enemy_window.nil?
-      #unless @battler.dead?
-        #if SceneManager.scene.enemy_window.active
-          #return false if @battler.enemy? && @battler.hidden #add
-          #return true if SceneManager.scene.enemy_window.enemy == @battler
-          #return true if SceneManager.scene.enemy_window.select_all?
-          #return true if highlight_aoe?
-        #end
-      #end
-      #end
-      return false
+      return true if tbs_gauge_visible?
+      return !@battler.dead? && @battler.displayed_area_affected?
     end
 
     #--------------------------------------------------------------------------

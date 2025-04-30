@@ -1,8 +1,8 @@
 #==============================================================================
-# Sprite_Tile v1.1
+# Sprite_Tile v1.2
 #------------------------------------------------------------------------------
 # Author: Timtrack
-# date: 18/03/2025
+# date: 09/04/2025
 #==============================================================================
 
 $imported = {} if $imported.nil?
@@ -30,6 +30,7 @@ $imported["TIM-SpriteTiles"] = true
 #------------------------------------------------------------------------------
 # 11/03/2025 - first version
 # 18/03/2025 - anim speed is no more a constant (except default one)
+# 09/04/2025 - code cleaning
 #==============================================================================
 # Installation: put it above Main and any other script using it
 #==============================================================================
@@ -113,11 +114,8 @@ class Sprite_SmallAutoTile < Sprite_Tile
   #--------------------------------------------------------------------------
   Relevant_neighbors = [[3,0,1],[1,2,5],[7,6,3],[5,8,7]]
   def get_tile_index(index,neighbors)
-    l = []
-    for i in Relevant_neighbors[index]
-      l.push(neighbors[i])
-    end
-    return 2 + index%2, index/2 if l[0] == 1 and l[1] == 0 and l[2] == 1
+    l = Relevant_neighbors[index].map{|i| neighbors[i]}
+    return 2 + index%2, index/2 if l[0] == 1 && l[1] == 0 && l[2] == 1
     mx = index%2 + (index%2 == 0 ? 2*neighbors[3] : 2*(1-neighbors[5]))
     my = 2+index/2 + (index/2 == 0 ? 2*neighbors[1] : 2*(1-neighbors[7]))
     return mx,my
@@ -178,13 +176,9 @@ class Sprite_AutoTile_Handler
         end
       end
       #create a Sprite_SmallAutoTile for each 16*16 squarre of a 32*32 tile
-      for i in [0,1,2,3]
-        @sprite_list.push(Sprite_SmallAutoTile.new(viewport,p[0],p[1],i,neigh))
-      end
+      [0,1,2,3].each{|i| @sprite_list.push(Sprite_SmallAutoTile.new(viewport,p[0],p[1],i,neigh))}
     end
-    for s in @sprite_list
-      s.set_bitmap(@bitmap) #links the bitmap to each sprites
-    end
+    @sprite_list.each{|s| s.set_bitmap(@bitmap)} #links the bitmap to each sprites
   end
 
   #--------------------------------------------------------------------------
@@ -192,9 +186,7 @@ class Sprite_AutoTile_Handler
   #--------------------------------------------------------------------------
   def update
     update_anim
-    for s in @sprite_list
-      s.update(@pattern)
-    end
+    @sprite_list.each{|s| s.update(@pattern)}
   end
 
   #--------------------------------------------------------------------------
@@ -209,9 +201,7 @@ class Sprite_AutoTile_Handler
   # new method: dispose -> must be called by a spriteset
   #--------------------------------------------------------------------------
   def dispose
-    for s in @sprite_list
-      s.dispose
-    end
+    @sprite_list.each{|s| s.dispose}
     @sprite_list = []
     #@bitmap.dispose #bitmap is in the cache so I guess there is no need to do this especially if the same bitmap is used somewhere else
   end

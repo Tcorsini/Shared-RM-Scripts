@@ -1,8 +1,8 @@
 #==============================================================================
-# TBS Event Triggers v1.1
+# TBS Event Triggers v1.2
 #------------------------------------------------------------------------------
 # Author: Timtrack
-# date: 03/04/2025
+# date: 09/04/2025
 # Requires: [TBS] by Timtrack
 #==============================================================================
 
@@ -16,6 +16,7 @@ $imported["TIM-TBS-EventTriggers"] = true #set to false if you wish to disable t
 # 29/03/2025: first version
 # 03/04/2025: events are now linked to battlers when calling on_battle_start
 #             instead of tbs_entrance, turn_start events trigger after count update
+# 09/04/2025: now supports help_window from core v0.7
 #==============================================================================
 # Description
 #------------------------------------------------------------------------------
@@ -124,7 +125,7 @@ $imported["TIM-TBS-EventTriggers"] = true #set to false if you wish to disable t
 #     alias methods: update, update_tbs_move
 #     new methods: on_leave(prev_pos), on_reach
 #   class Window_TBS_ActorCommand < Window_ActorCommand
-#     alias methods: add_custom_commands, draw_item
+#     alias methods: add_custom_commands, draw_item, update_help
 #     new methods: add_event_skill_command(sid), draw_skill(index,sid),
 #                  draw_skill_name(item, x, y, enabled, width),
 #                  draw_skill_cost(rect,skill,enabled), allow_extra_skill?(skill_id)
@@ -309,7 +310,7 @@ class Game_Battler < Game_BattlerBase
   alias trigger_on_battle_start on_battle_start
   def on_battle_start
     trigger_on_battle_start
-    evList = $game_map.battle_events_at(pos.x,pos.y).select{|ev| ev.link_on_start? and ev.battler.nil?}
+    evList = $game_map.battle_events_at(pos.x,pos.y).select{|ev| ev.link_on_start? && ev.battler.nil?}
     evList.each{|ev| ev.link_to_bat(self)}
   end
 end #Game_Battler
@@ -494,9 +495,9 @@ class Game_Character_TBS < Game_Character
   #--------------------------------------------------------------------------
   alias trigger_update_tbs_move update_tbs_move
   def update_tbs_move
-    on_reach if !moving? and @last_moving
+    on_reach if !moving? && @last_moving
     trigger_update_tbs_move
-    on_leave(@prev_pos) if moving? and !@last_moving
+    on_leave(@prev_pos) if moving? && !@last_moving
   end
 
   #--------------------------------------------------------------------------
@@ -584,7 +585,7 @@ class Game_Event < Game_Character
       tbs_trigger = TBS_PageData.new(@id)
       nread_page = true
       start = 0
-      while nread_page and @list
+      while nread_page && @list
         a,b,k,value = nil,nil,nil,nil
         for i in start...@list.size
           nread_page = false if i >= @list.size-1
@@ -594,12 +595,12 @@ class Game_Event < Game_Character
           key = TBS::EVENT_COMMENTS_TRIGGERS.key(res[0])
           next unless key
           tbs_trigger.follow_bat = true if key == :follow
-          tbs_trigger.give_skill_list.push(res[1].to_i) if (key == :getskill and res[1])
-          tbs_trigger.team = res[1].to_i if (key == :team and res[1])
-          tbs_trigger.move_type = eval(res[1]) if (key == :mtype and res[1])
+          tbs_trigger.give_skill_list.push(res[1].to_i) if key == :getskill && res[1]
+          tbs_trigger.team = res[1].to_i if key == :team && res[1]
+          tbs_trigger.move_type = eval(res[1]) if key == :mtype && res[1]
           #eval("tbs_trigger.move_type =" + res[1]) if (key == :mtype and res[1])
           next if TBS::EVENT_NO_END.include?(key)
-          if key == :end and k
+          if key == :end && k
             b = i
           elsif key != :end
             k = key
@@ -608,7 +609,7 @@ class Game_Event < Game_Character
           else
             puts sprintf("Badly written event %d on map %d", @id, $game_map.map_id)
           end
-          break if a and b
+          break if a && b
         end #for
         if TBS::EVENT_WITH_PARAM.include?(k)
           tbs_trigger.triggers[k][value] = a && b && @list.slice!(a, b-a+1).push(@list[-1])
@@ -751,6 +752,15 @@ class Window_TBS_ActorCommand < Window_ActorCommand
       change_color(mp_cost_color, enabled)
       draw_text(rect, @actor.skill_mp_cost(skill), 2)
     end
+  end
+  #--------------------------------------------------------------------------
+  # alias method: update_help -> handles the skills
+  #--------------------------------------------------------------------------
+  alias tbs_et_update_help update_help
+  def update_help
+    return tbs_et_update_help unless current_symbol == :event_skill
+    skill_id = current_ext
+    @help_window.set_item($data_skills[skill_id])
   end
 end #Window_TBS_ActorCommand
 
