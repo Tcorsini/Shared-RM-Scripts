@@ -13,34 +13,34 @@
 #    Before calling the item selection command (basic command)
 #    the variable ITEM_CLASS_VARIABLE (default 100) can be chaged to choose
 #    other items types such as basic items, weapons, armor (list below)
-#    
+#
 #    If using different item types (equipments or all, value 5 or 6) the type of
 #    the item should be stored in ITEM_SELECTED_CLASS_VARIABLE (default 99)
 #    only if ITEM_SELECTED_RETURN_CLASS is set to true
 #    The type is 0 if item, 1 if weapon, 2 if armor
-#    
+#
 #    By default, only usable items can be selected, it is possible here to select
 #    any item, this feature is stored in switch ITEM_SELECTION_SWITCH (default 100).
 #    If the switch is set to true, any displayed item can be selected, else, the
 #    default comportment is called.
-#  
+#
 #Français :
 #  Utilisation :
 #    Avant d'appeler la fenêtre de selection des objets, on modifie
 #    la variable ITEM_CLASS_VARIABLE (par défaut 100) pour afficher
 #    d'autres types d'objets comme les items de base, les armes ou les armures
 #    (possibilités dans la liste ITEM_SELECTION_CLASS)
-#    
-#    Il est possible d'afficher plusieurs types d'objets à la fois 
+#
+#    Il est possible d'afficher plusieurs types d'objets à la fois
 #    (armes et armures ou n'importe quoi), le type de l'objet selectionné devrait
 #    être stocké dans la variable ITEM_SELECTED_CLASS_VARIABLE (par défaut 99), cette
 #    propriété est activé si ITEM_SELECTED_RETURN_CLASS est mis à "true"
-#    La valeur du type stocké est : 
-#      0 si item, 
-#      1 si arme, 
+#    La valeur du type stocké est :
+#      0 si item,
+#      1 si arme,
 #      2 si armure
-#      
-#    De base, on ne peut choisir que les objets utilisables, il est maintenant 
+#
+#    De base, on ne peut choisir que les objets utilisables, il est maintenant
 #    possible de selectionner n'importe quel objet dans la liste, cette fonctionnalité
 #    est définie par l'interrupteur ITEM_SELECTION_SWITCH (par défaut 100).
 #    Si l'interrupteur est vrai, alors n'importe quel objet peut être choisi, sinon
@@ -48,7 +48,7 @@
 #
 #==============================================================================
 module Item_Selection
-  
+
   #types concerned and the variable value corresponding
   ITEM_SELECTION_CLASS = {
     0 => :item,
@@ -60,13 +60,13 @@ module Item_Selection
     5 => :equipments, #weapons and armors
     6 => :all, #any object
   }
-  
+
   #var where the type of the objects displayed is stored
   ITEM_CLASS_VARIABLE = 100
   #if switch true, then default (only selectable items) else any item is selectable
   ITEM_SELECTION_SWITCH = 100
-  
-  
+
+
   #is the type (weapon, item, armor) of the object stored ?
   ITEM_SELECTED_RETURN_CLASS = false
   #var where the type of the selected object is stored
@@ -80,7 +80,7 @@ end #Item_Selection
 class Window_KeyItem < Window_ItemList
   include Item_Selection
   #--------------------------------------------------------------------------
-  # alias method: update_placement -> when opening the window, 
+  # alias method: update_placement -> when opening the window,
   # choose beforehand which items selecting
   #--------------------------------------------------------------------------
   alias update_placement_item_selection update_placement
@@ -88,20 +88,16 @@ class Window_KeyItem < Window_ItemList
     self.category = ITEM_SELECTION_CLASS[$game_variables[ITEM_CLASS_VARIABLE]]
     update_placement_item_selection
   end
-  
+
   #--------------------------------------------------------------------------
   # alias method: enable? -> when selecting an item,
   # set if any item can be chosen or only the usable
   #--------------------------------------------------------------------------
   alias enable_item_selection enable?
   def enable?(item)
-    if $game_switches[ITEM_SELECTION_SWITCH]
-      return true
-    else
-      enable_item_selection(item)
-    end
+    $game_switches[ITEM_SELECTION_SWITCH] || enable_item_selection(item)
   end
-  
+
   #--------------------------------------------------------------------------
   # alias method: include? -> when opening the windows, sets which items are visible
   #--------------------------------------------------------------------------
@@ -120,7 +116,7 @@ class Window_KeyItem < Window_ItemList
   end
 
   #--------------------------------------------------------------------------
-  # alias method: on_ok -> when the item is selected, stores if chosen, 
+  # alias method: on_ok -> when the item is selected, stores if chosen,
   # the type of the item
   #--------------------------------------------------------------------------
   alias on_ok_item_selection on_ok
@@ -131,7 +127,7 @@ class Window_KeyItem < Window_ItemList
     end
     on_ok_item_selection
   end
-  
+
   #--------------------------------------------------------------------------
   # new method: item_class_value -> determines a value for the type of the item
   #--------------------------------------------------------------------------

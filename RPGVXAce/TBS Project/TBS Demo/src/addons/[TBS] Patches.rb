@@ -1,7 +1,7 @@
 #==============================================================================
 #
 # �� TBS PatchHub by Timtrack
-# -- Last Updated: 09/04/2025
+# -- Last Updated: 18/04/2025
 # -- Requires: [TBS] by Timtrack
 #
 #==============================================================================
@@ -18,6 +18,8 @@ $imported["TIM-TBS-PatchHub"] = true
 # 28/03/2025: core v0.5 support
 # 02/04/2025: bugfix and core v0.6 support
 # 09/04/2025: YEA System options linked to v0.7 addon option menu
+# 18/04/2025: added patch for dodger451's Threat System
+# 04/05/2025: patch with dodger451's Threat System and handle TBS-Save addon
 #==============================================================================
 # �� Description
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -28,14 +30,15 @@ $imported["TIM-TBS-PatchHub"] = true
 #
 # List of supported scripts by TBS.
 # Without any patch:
-# --to fill with relevant scripts--
+# - YEA - Ace Save Engine v1.03
 # With this patch:
-# - YEA Victory Aftermath v1.04
-# - Zeus Lights & Shadows v1.3
 # - YEA Core Engine v1.09
 # - YEA Battle Core v1.22
 # - YEA Enemy HP Bars v1.10
 # - YEA System Options v1.00
+# - YEA Victory Aftermath v1.04
+# - Zeus Lights & Shadows v1.3
+# - dodger451's Threat System v0.1
 # TODO: check if the patch works with:
 # - YEA Lunatic States v1.02
 # - YEA Skill Restrictions v1.02
@@ -46,7 +49,7 @@ $imported["TIM-TBS-PatchHub"] = true
 # If an unsupported script is used that modify the following classes then:
 # -Scene_Battle should work properly if tbs is disabled but no modification
 #  to it will affect a tbs battle, see Scene_TBS_Battle if you want to add new features
-# -BattleManager or skill targetting changes are unlikely to work with TBS
+# -BattleManager or skill targeting changes are unlikely to work with TBS
 # -Changes to Sprite_Battler must be exported to Sprite_Character_TBS in order to work in TBS
 # -Changes to Spriteset_Battle must be exported to Spriteset_Map in order to work in TBS
 # -Changes to Spriteset_Map or Game_Map might impact TBS battles but may not work properly
@@ -335,6 +338,13 @@ if $imported["YEA-BattleEngine"]
       end
     end
 
+    #--------------------------------------------------------------------------
+    # alias method: can_rm_sprite? -> sprite will be removed after effects were performed
+    #--------------------------------------------------------------------------
+    alias popup_abe_can_rm_sprite? can_rm_sprite?
+    def can_rm_sprite?
+      @popups.empty? && popup_abe_can_rm_sprite?
+    end
   end # Sprite_Character_TBS
 
 
@@ -615,7 +625,7 @@ if $imported["YEA-BattleEngine"]
         lunatic_object_effect(:before, item, @subject, @subject)
       end
       process_casting_animation if $imported["YEA-CastAnimations"]
-      targets = tbs ? @subject.current_action.tbs_make_targets : @subject.current_action.make_targets.compact
+      targets = tbs ? @subject.current_action.tbs_make_final_targets : @subject.current_action.make_targets.compact
       @subject.current_action.call_additional_tbs_effects if tbs
       (tbs ? show_tbs_animation(targets, item.animation_id, @subject.current_action) : show_animation(targets, item.animation_id)) if show_all_animation?(item)
       targets.each {|target|
@@ -1197,3 +1207,152 @@ if $imported["YEA-EnemyHPBars"] && $imported["YEA-BattleEngine"]
   end #Enemy_HP_Gauge_Viewport
 
 end #YEA-EnemyHPBars
+
+#==============================================================================
+# dodger451 - Threat System
+#==============================================================================
+# Expands the threat system to tbs battles, the threat table works both for
+# actor's ais and enemies. Random targets for skills are still handled by tgr
+# but chosen targets by ais (confused or not) are selected by threat system (also
+# tgr dependant).
+# Threat system is changed to hp% modified instead of brute hps
+#==============================================================================
+if $imported["dodger451-ThreatSystem"]
+  #==========================================================================
+  # Scene_TBS_Battle -> integrates the $game_threat obj
+  #==========================================================================
+  class Scene_TBS_Battle < Scene_Base
+    #--------------------------------------------------------------------------
+    # alias method: start
+    #--------------------------------------------------------------------------
+    alias scene_tbs_battlestart_ga start
+    def start
+      $game_threat = Game_Threat.new()
+      $game_threat.init_threat_tables
+      scene_tbs_battlestart_ga
+    end
+
+    if $imported["TIM-TBS-Save"]
+      #--------------------------------------------------------------------------
+      # alias method: save_battle_state
+      #--------------------------------------------------------------------------
+      alias threat_save_battle_state save_battle_state
+      def save_battle_state
+        threat_save_battle_state
+        $game_temp.tbs_scene_data[:threat] = $threat_tables
+      end
+
+      #--------------------------------------------------------------------------
+      # alias method: retrieve_battle_state
+      #--------------------------------------------------------------------------
+      alias threat_retrieve_battle_state retrieve_battle_state
+      def retrieve_battle_state
+        $threat_tables = $game_temp.tbs_scene_data[:threat] if $game_temp.save_was_in_tbs?
+        threat_retrieve_battle_state
+      end
+    end #$imported["TIM-TBS-Save"]
+  end # Scene_TBS_Battle
+
+  #==========================================================================
+  # Game_Battler -> threat system is now related to team relationship
+  # updated threat_from method introduced by TBS
+  #==========================================================================
+  class Game_Battler < Game_BattlerBase
+    #--------------------------------------------------------------------------
+    # alias method: update_threat_on_execute_damage
+    #--------------------------------------------------------------------------
+    alias tbs_update_threat_on_execute_damage update_threat_on_execute_damage
+    def update_threat_on_execute_damage(user)
+      return tbs_update_threat_on_execute_damage(user) unless SceneManager.scene_is?(Scene_TBS_Battle)
+      case true_friend_status(user)
+      when TBS::ENEMY
+        $game_threat.update_threat_on_damage(@result, user, self) if @result.hp_damage > 0
+      when TBS::NEUTRAL #ambiguous case
+        if @result.hp_damage > 0
+          $game_threat.update_threat_on_damage(@result, user, self)
+        elsif @result.hp.damage < 0
+          $game_threat.update_threat_on_heal(@result, user, self)
+        end
+      when TBS::FRIENDLY, TBS::SELF
+        $game_threat.update_threat_on_heal(@result, user, self) if @result.hp_damage < 0
+      end
+    end
+    #--------------------------------------------------------------------------
+    # alias method: threat_from -> the method used by ais for targeting weight
+    #--------------------------------------------------------------------------
+    alias tbs_patch_threat_from threat_from
+    def threat_from(bat)
+      tbs_patch_threat_from(bat) * (1 + $game_threat.get_threat(object_id, bat.object_id)).to_f
+    end
+  end # Game_Battler
+
+  #==========================================================================
+  # Game_Threat -> will find units from team system instead of game_units and
+  # will refer to units by their object_id instead of their names
+  #==========================================================================
+  class Game_Threat
+    #--------------------------------------------------------------------------
+    # alias method: add_threat -> refers to table by ids instead
+    #--------------------------------------------------------------------------
+    alias tbs_add_threat add_threat
+    def add_threat(enemy_defender, actor_attacker, additional_threat)
+      return tbs_add_threat(enemy_defender, actor_attacker, additional_threat) unless SceneManager.scene_is?(Scene_TBS_Battle)
+      d_ref = enemy_defender.object_id
+      a_ref = actor_attacker.object_id
+      init_threat(d_ref, a_ref) unless threat_initialized?(d_ref, a_ref);
+      $threat_tables[d_ref][a_ref] +=  additional_threat;
+    end
+
+    #--------------------------------------------------------------------------
+    # alias method: tgr_threat -> refers to table by ids instead, first parameter
+    # is a Game_Battler instead of a string object in Scene_TBS_Battle
+    #--------------------------------------------------------------------------
+    alias tbs_tgr_threat tgr_threat
+    def tgr_threat(bat, opponent)
+      return tbs_tgr_threat(bat, opponent) unless SceneManager.scene_is?(Scene_TBS_Battle)
+      opponent.tgr * (1 + get_threat(bat.object_id, opponent.object_id)).to_f
+    end
+
+    #--------------------------------------------------------------------------
+    # alias method: update_threat_on_heal -> will find units from team system
+    # instead of units and change how threat value is calculated (%hp instead)
+    #--------------------------------------------------------------------------
+    # result, battler, battler -> self
+    alias tbs_update_threat_on_heal update_threat_on_heal
+    def update_threat_on_heal(result, healer, healed)
+      return tbs_update_threat_on_heal(result, healer, healed) unless SceneManager.scene_is?(Scene_TBS_Battle)
+      # todo smarter scaling, e.g. relative to hp, lg scaled,...
+      # actor_healed
+
+      #to test
+      opponents = SceneManager.scene.tactics_battlers.select{|bat| bat.alive? && bat.true_friend_status(healed) == TBS::ENEMY}
+      alive_count = opponents.size;
+      return self unless alive_count>0
+
+      dmg_ratio = [1,-result.hp_damage.to_f / healed.mhp].min
+      #additional_threat = ((1 + (-result.hp_damage)).to_f/alive_count.to_f).to_i
+      additional_threat = dmg_ratio/alive_count.to_f
+      dbg healer.name + " heals " + result.hp_damage.to_s + " hp on " + healed.name+", all his enemies feel more threatened (+"+additional_threat.to_s+" each)"
+      opponents.each do |bat|
+        dbg " -> " + bat.name + " feels " + additional_threat.to_s + " more threatened by  " + healer.name
+        add_threat(bat, healer, additional_threat)
+      end
+      return self
+    end
+
+    #--------------------------------------------------------------------------
+    # alias method: update_threat_on_damage -> change how threat value is calculated (%hp instead)
+    #--------------------------------------------------------------------------
+    alias tbs_update_threat_on_damage update_threat_on_damage
+    def update_threat_on_damage(result, actor_attacker, enemy_defender)
+      return tbs_update_threat_on_damage(result, actor_attacker, enemy_defender) unless SceneManager.scene_is?(Scene_TBS_Battle)
+      # todo emit also to teammates
+      # todo smarter scaling, e.g. relative to hp, lg scaled,...
+      additional_threat = [1,result.hp_damage.to_f / enemy_defender.mhp].min
+      dbg actor_attacker.name + " causes " + result.hp_damage.to_s + " damage on " + enemy_defender.name+", " +enemy_defender.name+" feels more threatened (+"+additional_threat.to_s+")"
+      add_threat(enemy_defender, actor_attacker, additional_threat)
+      #$threat_tables[enemy_defender.name][actor_attacker.name] +=  additional_threat;
+      return self
+    end
+  end #Game_Threat
+end #dodger451-ThreatSystem

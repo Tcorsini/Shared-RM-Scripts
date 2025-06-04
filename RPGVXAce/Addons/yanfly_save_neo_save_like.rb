@@ -1,9 +1,10 @@
 #==============================================================================
-# Neo Save System for VX ace
+# Neo Save System for VX ace v1.2
 # Recreates the Neo Save System on VX ace using Yanfly Save Manager and Zeus Bitmap Export
 #------------------------------------------------------------------------------
 # Author: Timtrack
 # date: 24/02/2025
+# modified the 30/04/2025
 # Requires: 
 # -Ace Save Engine 1.03 by Yanfly 
 # -Bitmap Export v5.4 by Zeus81
@@ -42,11 +43,13 @@ module NeoSave
   Picture_dir = "" #fill this if you use a subdir
   Picture_location = "save_pic_%02d.png" #%02d is the id of the save file
   SCREENSHOT_HEIGHT = 140
+  MAP_BORDER_COLOR = Color.new(0,0,0,200)
+  MAP_BORDER_SIZE = 2 #in pixels
   
   def self.get_picture_name(file_index)
     return sprintf(Picture_location,file_index+1)
   end
-end
+end #NeoSave
 
 #==============================================================================
 # Window_FileStatus
@@ -75,11 +78,16 @@ class Window_FileStatus < Window_Base
     bitmap = Cache.load_bitmap(NeoSave::Picture_dir, NeoSave.get_picture_name(@current_index)) rescue return
     shift_x = (bitmap.width - dw)/2
     shift_y = (bitmap.height - NeoSave::SCREENSHOT_HEIGHT)/2
-    rect = Rect.new(shift_x,shift_y,dw,NeoSave::SCREENSHOT_HEIGHT)
-    contents.blt(dx, dy, bitmap, rect, 255)
+    
+    inside_rect = Rect.new(dx,dy,dw,NeoSave::SCREENSHOT_HEIGHT)
+    contents.fill_rect(inside_rect, NeoSave::MAP_BORDER_COLOR)
+    
+    d = NeoSave::MAP_BORDER_SIZE
+    rect = Rect.new(shift_x,shift_y,dw-2*d,NeoSave::SCREENSHOT_HEIGHT-2*d)
+    contents.blt(dx+d, dy+d, bitmap, rect, 255)
     bitmap.dispose
   end
-end
+end #Window_FileStatus
 
 #==============================================================================
 # Scene_File
@@ -109,7 +117,7 @@ class Scene_File < Scene_MenuBase
   def save_map_picture
     Scene_Map.temp_bit_map.export(NeoSave::Picture_dir + NeoSave.get_picture_name(@file_window.index))
   end
-end
+end #Scene_File
 
 #==============================================================================
 # Scene_Map
@@ -133,15 +141,22 @@ class Scene_Map < Scene_Base
   #--------------------------------------------------------------------------
   alias neo_save_map_terminate terminate
   def terminate
-    @@tmp_bitmap.dispose unless @@tmp_bitmap.nil?
-    @@tmp_bitmap = Graphics.snap_to_bitmap
+    Scene_Map.take_picture
     neo_save_map_terminate
   end
   
   #--------------------------------------------------------------------------
-  # new method: temp_bit_map
+  # new class method: temp_bit_map
   #--------------------------------------------------------------------------
   def self.temp_bit_map
     return @@tmp_bitmap
   end
-end
+  
+  #--------------------------------------------------------------------------
+  # new class method: take_picture
+  #--------------------------------------------------------------------------
+  def self.take_picture
+    @@tmp_bitmap.dispose unless @@tmp_bitmap.nil?
+    @@tmp_bitmap = Graphics.snap_to_bitmap
+  end
+end #Scene_Map

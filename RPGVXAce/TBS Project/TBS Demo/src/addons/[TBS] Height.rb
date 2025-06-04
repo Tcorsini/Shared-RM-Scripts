@@ -2,12 +2,12 @@
 # TBS Height
 #------------------------------------------------------------------------------
 # Author: Timtrack
-# date: 09/04/2025
+# date: 09/05/2025
 # Requires: [TBS] by Timtrack
 #==============================================================================
 
 $imported = {} if $imported.nil?
-$imported["TIM-TBS-Height"] = false #set to false if you wish to disable the modifications
+$imported["TIM-TBS-Height"] = true #set to false if you wish to disable the modifications
 raise "TBS Height requires TBS by Timtrack" unless $imported["TIM-TBS"] if $imported["TIM-TBS-Height"]
 
 #==============================================================================
@@ -15,6 +15,7 @@ raise "TBS Height requires TBS by Timtrack" unless $imported["TIM-TBS"] if $impo
 #------------------------------------------------------------------------------
 # 24/02/2025: first version
 # 09/04/2025: code fix
+# 09/05/2025: adapted to Core v0.8, first iteration of ADVANCED_HEIGHT_SYSTEM
 #==============================================================================
 # Description
 #------------------------------------------------------------------------------
@@ -28,7 +29,7 @@ raise "TBS Height requires TBS by Timtrack" unless $imported["TIM-TBS"] if $impo
 #==============================================================================
 # Installation: put it after TBS core files and before TBS PatchHub
 #
-# You should modify the constants from TBS_HEIGHT to settle the default height
+# You should modify the constants from TBS::HEIGHT to settle the default height
 # for battlers, choose which targeting system for TBS is used (a simple height
 # or a more complicated but realistic one).
 #
@@ -43,61 +44,63 @@ raise "TBS Height requires TBS by Timtrack" unless $imported["TIM-TBS"] if $impo
 # Terms of use: same as TBS project
 #==============================================================================
 
-module TBS_HEIGHT
-  DEFAULT_ACTOR_HEIGHT = 1
-  DEFAULT_ENEMY_HEIGHT = 1
-
-  module REGEXP
-    HEIGHT       = /<height:\s*\-*((\d*\.)?\d+)>/i
-  end
-
-  #DEFAULT SYSTEM: follows a min/max operation, higher units can target things below
-  #them (or at the same level) while higher tiles are obstacles to lower tiles
-  #If there is a tile even higher behind, it will be seen by the caster.
-  #ADVCANCED SYSTEM: similar to railcasting when checking which tiles cann be obstacles
-  #Draw a line from caster to target in 3d and checks if the crossed tiles/units are obstacles
-  ADVANCED_HEIGHT_SYSTEM = false #keep it false, the avanced system is not yet implemented
-  DEFAULT_ZONE_HEIGHT = 0 #if no zone is specified or ZONE_HEIGHT[zone_id] is not specified
-
-  MIN_BAT_HEIGHT = 0.1 #must be a stricly positive value
-
-  FLY_HEIGHT = 1 #this will be added to the height of the battler when flying, leaving space between its legs and the ground too
-  MAX_HEIGHT = 100 #if zone_height > MAX_HEIGHT, then the tile cannot be crossed by the battler, this puts a limit to flying unit with virtual obstacles
-
-  #indices are zone_ids, values or the height associated to each zone
-  #height can be real number
-  ZONE_HEIGHT = [DEFAULT_ZONE_HEIGHT,1,2,3,4,5,6,7,8,9,
-                1000,-1,-2,-3,-4,-5,-6,-7,-8,-9]
-
-#==============================================================================
-# Changing things below is at your own risk!
-#==============================================================================
-
-  def self.zone_height(zone_id)
-    h = ZONE_HEIGHT[zone_id]
-    return h.nil? ? DEFAULT_ZONE_HEIGHT : h
-  end
-
-  #move type is ground, fly etc.
-  def self.height_addition(move_type)
-    return move_type == :fly ? FLY_HEIGHT : 0
-  end
-end #module TBS_HEIGHT
-
 if $imported["TIM-TBS-Height"]
   #============================================================================
   # TBS
   #============================================================================
   module TBS
+    #==========================================================================
+    # HEIGHT
+    #==========================================================================
+    module HEIGHT
+      DEFAULT_ACTOR_HEIGHT = 1
+      DEFAULT_ENEMY_HEIGHT = 1
+
+      module REGEXP
+        HEIGHT       = /<height:\s*\-*((\d*\.)?\d+)>/i
+      end
+
+      #SIMPLE SYSTEM: follows a min/max operation, higher units can target things below
+      #them (or at the same level) while higher tiles are obstacles to lower tiles
+      #If there is a tile even higher behind, it will be seen by the caster.
+      #ADVCANCED SYSTEM: similar to railcasting when checking which tiles cann be obstacles
+      #Draw a line from caster to target in 3d and checks if the crossed tiles/units are obstacles
+      ADVANCED_HEIGHT_SYSTEM = true
+      DEFAULT_ZONE_HEIGHT = 0 #if no zone is specified or ZONE_HEIGHT[zone_id] is not specified
+
+      MIN_BAT_HEIGHT = 0.1 #must be a stricly positive value
+
+      FLY_HEIGHT = 1 #this will be added to the height of the battler when flying, leaving space between its legs and the ground too
+      MAX_HEIGHT = 100 #if zone_height > MAX_HEIGHT, then the tile cannot be crossed by the battler, this puts a limit to flying unit with virtual obstacles
+
+      #indices are zone_ids, values or the height associated to each zone
+      #height can be real number
+      ZONE_HEIGHT = [DEFAULT_ZONE_HEIGHT,1,2,3,4,5,6,7,8,9,
+                    1000,-1,-2,-3,-4,-5,-6,-7,-8,-9]
+
+    #==========================================================================
+    # Changing things below is at your own risk!
+    #==========================================================================
+
+      def self.zone_height(zone_id)
+        h = ZONE_HEIGHT[zone_id]
+        return h.nil? ? DEFAULT_ZONE_HEIGHT : h
+      end
+
+      #move type is ground, fly etc.
+      def self.height_addition(move_type)
+        return move_type == :fly ? FLY_HEIGHT : 0
+      end
+    end # HEIGHT
+
     #--------------------------------------------------------------------------
     # alias method: tbs_passable? (for move rules -> takes into account a maximum altitude)
     #--------------------------------------------------------------------------
     class <<self; alias tbs_height_passable? tbs_passable?; end
     def self.tbs_passable?(x,y,d,type)
-      return (tbs_height_passable?(x,y,d,type) && $game_map.tbs_height([x,y]) <= TBS_HEIGHT::MAX_HEIGHT)
+      return (tbs_height_passable?(x,y,d,type) && $game_map.tbs_height([x,y]) <= HEIGHT::MAX_HEIGHT)
     end
-  end
-
+  end # TBS
 
   #============================================================================
   # DataManager
@@ -143,7 +146,7 @@ if $imported["TIM-TBS-Height"]
       self.note.split(/[\r\n]+/).each { |line|
         case line
         #---
-        when TBS_HEIGHT::REGEXP::HEIGHT
+        when TBS::HEIGHT::REGEXP::HEIGHT
           @height = $1.to_f
         end
         #---
@@ -160,7 +163,7 @@ if $imported["TIM-TBS-Height"]
     # new method: unit_height -> the base height of the unit
     #--------------------------------------------------------------------------
     def unit_height
-      actor? ? TBS_HEIGHT::DEFAULT_ACTOR_HEIGHT : TBS_HEIGHT::DEFAULT_ENEMY_HEIGHT
+      actor? ? TBS::HEIGHT::DEFAULT_ACTOR_HEIGHT : TBS::HEIGHT::DEFAULT_ENEMY_HEIGHT
     end
     #--------------------------------------------------------------------------
     # new method: tbs_height
@@ -168,13 +171,13 @@ if $imported["TIM-TBS-Height"]
     #height object is a tuple [min_height, max_height]
     #for a unit on a tile, there are 3 data [ground_level,min_height,max_height]
     def tbs_height
-      base_height = TBS_HEIGHT.height_addition(TBS::MOVE_DATA[move_rule_id][0])
+      base_height = TBS::HEIGHT.height_addition(TBS::MOVE_DATA[move_rule_id][0])
       height = unit_height
       for s_id in @states
         h = $data_states[s_id].height
         height += h if h
       end
-      height = [height, TBS_HEIGHT::MIN_BAT_HEIGHT].max
+      height = [height, TBS::HEIGHT::MIN_BAT_HEIGHT].max
       return base_height, base_height+height
     end
   end
@@ -188,7 +191,7 @@ if $imported["TIM-TBS-Height"]
     #--------------------------------------------------------------------------
     def unit_height
       h = $data_actors[@actor_id].height
-      return h ? h : TBS_HEIGHT::DEFAULT_ACTOR_HEIGHT
+      return h ? h : TBS::HEIGHT::DEFAULT_ACTOR_HEIGHT
     end
   end
 
@@ -201,7 +204,7 @@ if $imported["TIM-TBS-Height"]
     #--------------------------------------------------------------------------
     def unit_height
       h = $data_enemies[@enemy_id].height
-      return h ? h : TBS_HEIGHT::DEFAULT_ENEMY_HEIGHT
+      return h ? h : TBS::HEIGHT::DEFAULT_ENEMY_HEIGHT
     end
   end
 
@@ -213,7 +216,7 @@ if $imported["TIM-TBS-Height"]
     # new method: tbs_height
     #--------------------------------------------------------------------------
     def tbs_height(pos)
-      return TBS_HEIGHT.zone_height(region_id(pos[0],pos[1]))
+      return TBS::HEIGHT.zone_height(region_id(pos[0],pos[1]))
     end
 
     #--------------------------------------------------------------------------
@@ -226,21 +229,24 @@ if $imported["TIM-TBS-Height"]
       return [zone_h, min_h+zone_h, max_h + zone_h]
     end
     #--------------------------------------------------------------------------
-    # new method: simple_height_target
+    # new method: simple_height_target -> return true if source can see target
+    # Works like this:
+    # I can see anything below my height unless there is an obstacle in the middle
+    # If the obstacles met are above the height of my target, then I cannot see it
     #--------------------------------------------------------------------------
     def simple_height_target(bat,source,target)
       posList,dirs = TBS.crossed_positions_dir(source,target)
-      max_h = height_property(source,bat)[2]
+      max_h = height_property(source,bat)[2] #my height
       tgt_prop = height_property(target,occupied_by?(target.x,target.y))
 
-      obstacle_h = 0
+      obstacle_h = 0 #max height of obstacles met
       for i in 0...posList.size-1
         p = posList[i]
         if TBS::BATTLER_HIDE #this feature is still used
           bat2 = occupied_by?(p.x,p.y)
           if (bat2 && bat2.hide_view?(bat))
             prop = height_property(p,bat2)
-            delta = prop[2] - max_h
+            delta = prop[2] - max_h #is the unit above my height?
             if delta > obstacle_h && (prop[1] - max_h <= obstacle_h)
               obstacle_h = delta
               return false if prop[2] >= tgt_prop[2]
@@ -248,6 +254,7 @@ if $imported["TIM-TBS-Height"]
             next #this is enough
           end
         end
+        #case when no bat2 is met:
         h = tbs_height(p)
         delta = h - max_h
         if delta > obstacle_h
@@ -259,22 +266,43 @@ if $imported["TIM-TBS-Height"]
     end
 
     #--------------------------------------------------------------------------
-    # new method: advanced_height_target
+    # new method: advanced_height_target -> return true if source can see target
+    # Works like this: draw a line from source to target (as center)
+    # If any cell met (or blocking battlers) have height above my line, then return
+    # false
     #--------------------------------------------------------------------------
     def advanced_height_target(bat,source,target)
-      return true #code not yet working!
-      posList, dirs, aList = TBS_HEIGHT.crossedPositionsAxis(source,target)
+      #return true #code not yet working!
+      posList, dirs, aList = TBS.crossed_positions_axis(source,target)
       cast_h = height_property(source,bat)[2]
       b2 = occupied_by?(target.x,target.y)
       tgt_prop = height_property(target,b2)
-      segList = []
-      if b2
-        segList.push([TBS_HEIGHT.get_a(cast_h,tgt_prop[1],aList[-1]),TBS_HEIGHT.get_a(cast_h,tgt_prop[2],aList[-1])])
-      else
-        segList.push([TBS_HEIGHT.get_a(cast_h,tgt_prop[0],aList[-2]),TBS_HEIGHT.get_a(cast_h,tgt_prop[0],aList[-1])])
+
+      a = TBS.get_a(cast_h,tgt_prop[1],aList[-2])
+      b = TBS.get_a(cast_h,tgt_prop[2],aList[-1])
+      true_a = [a,b].min
+      #puts sprintf("For %s to target %d,%d", bat.name, target.x,target.y)
+      seg_list = Interval.new(true_a,[a,b].max) #list of pairs [a,b] that represent available a values, basically an interval structure
+      #puts seg_list.to_s
+      i = 0
+      until seg_list.empty? || i >= posList.size-1
+        p = posList[i]
+        if TBS::BATTLER_HIDE #this feature is still used
+          bat2 = occupied_by?(p.x,p.y)
+          if (bat2 && bat2.hide_view?(bat))
+            prop = height_property(p,bat2)
+            a = TBS.get_a(cast_h,prop[1],aList[i])
+            b = TBS.get_a(cast_h,prop[2],aList[i+1])
+            seg_list.remove([a,b].min,[a,b].max)
+          end
+        end
+        a = true_a-1
+        b = TBS.get_a(cast_h,tbs_height(p),aList[i+1])
+        seg_list.remove([a,b].min,[a,b].max)
+        i += 1
       end
-      return true
-      region_id(x,y)
+      #puts seg_list.to_s
+      return !seg_list.empty?
     end
 
     #--------------------------------------------------------------------------
@@ -282,59 +310,63 @@ if $imported["TIM-TBS-Height"]
     #--------------------------------------------------------------------------
     def can_see?(bat,source,target)
       return true if source == target
-      return TBS_HEIGHT::ADVANCED_HEIGHT_SYSTEM ? advanced_height_target(bat,source,target) : simple_height_target(bat,source,target)
+      return TBS::HEIGHT::ADVANCED_HEIGHT_SYSTEM ? advanced_height_target(bat,source,target) : simple_height_target(bat,source,target)
     end
   end
 
   #============================================================================
-  # module TBS_HEIGHT (for advamced calculation, not yet working!)
+  # module TBS (add advanced calculation, not yet working!)
   #============================================================================
-  module TBS_HEIGHT
-
-    #get the a value for f(x) = ax +b such that h1 = f(0) and h2 = f(x)
-    #-> h2-h1 = ax ...
+  module TBS
+    #--------------------------------------------------------------------------
+    # new method: get_a -> get the a value for f(x) = ax +b such that h1 = f(0) and h2 = f(x)
+    #--------------------------------------------------------------------------
+    #h2-h1 = ax
     def self.get_a(h1,h2,x)
-      return (h2-h1) / x
+      return (h2-h1).to_f / x
     end
 
-    #return a triplet of lists l,dirs,dist
-    #l = list of position crossed from source to target (will not contain the source pos but will contain the target)
-    #d = direction (in rpgmaker way) showing by which angle the position is reached
-    #dist = the distance between the source and the element from l
-    def self.crossedPositionsAxis(source,target)
-      l = []
-      dirs = []
-      dist = []
-      sx = source.x
-      sy = source.y
-      tx = target.x
-      ty = target.y
-      dx = (tx - sx)
-      dy = (ty - sy)
+    #--------------------------------------------------------------------------
+    # new method: crossed_positions_axis -> return a triplet l,d,dist with:
+    # l an array of positions crossed from source to target (will not contain the source pos but will contain the target)
+    # d an array of directions (in rpgmaker way) showing by which angle the position is reached
+    # dist an array of distances between the source and the position from l
+    # the distance of cell l[i] is dist[i] and dist[i+1] (when line meets square and when line leaves square)
+    # as such, dist.size = l.size+1 to have the total length of the last cell
+    #--------------------------------------------------------------------------
+    def self.crossed_positions_axis(source,target)
+      l, dirs, dist = [], [], []
+      sx,sy = source.x, source.y
+      tx,ty = target.x, target.y
+      dx,dy = (tx - sx), (ty - sy)
       #value of the function y = f(x) = ax + b
       #then what matters is for x barrier in [sx,tx] there are ys that changes as integers
       #same for y
       return l, dirs, dist if dx == 0 && dy == 0
-      #diagonal case
+      #intialize main directions for x and y axis
       lx = dx < 0 ? -1 : 1
       ly = dy < 0 ? -1 : 1
+      #diagonal case
       if dx.abs() == dy.abs()
         d = TBS.delta_to_direction(lx,ly)
+        #added:
         sqr2 = Math.sqrt(2)
         abscisse = sqr2/2
+        #---
         while sx != tx
           sx += lx
           sy += ly
           l.push(POS.new(sx,sy))
           dirs.push(d)
+          #added:
           dist.push(abscisse)
           abscisse += sqr2
+          #---
         end
-        dits.push(abscisse) #adds one more value to check when leaving the last square
+        dist.push(abscisse)
         return l, dirs, dist
       end
-      a = 0
-      b = 0
+      a = b = 0
       if dx == 0
         a = 100000000 #a big enough integer such that y never changes
         b = 0 #the value does not matter
@@ -342,16 +374,13 @@ if $imported["TIM-TBS-Height"]
         a = dy.to_f()/dx.to_f()
         b = sy - a*sx
       end
-      xrange = crossedRange(sx,tx)
-      yrange = crossedRange(sy,ty)
-      d = 5
-      ix = 0 #index in xrange
-      iy = 0
-      x = sx #previous
-      y = sy
+      xrange = crossed_range(sx,tx)
+      yrange = crossed_range(sy,ty)
+      d = 5  #center direction
+      ix = iy = 0 #index in xrange amd yrange
+      x,y = sx,sy #previous positions
       while ix < xrange.size || iy < yrange.size
-        x1 = sx #considered position
-        y1 = sy
+        x1, y1 = sx, sy #considered position
         if ix < xrange.size
           x1 = xrange[ix]
           y1 = a*x1 + b
@@ -360,8 +389,7 @@ if $imported["TIM-TBS-Height"]
             x2 = (y2 - b)/a
             #checks if x2 is closer to x than x1
             if (sx-x1).abs() > (sx-x2).abs()
-              x1 = x2
-              y1 = y2
+              x1, y1 = x2, y2
               iy += 1
               d = TBS.delta_to_direction(0,ly)
               #d = dx > 0 ? 6 : 4
@@ -382,19 +410,165 @@ if $imported["TIM-TBS-Height"]
           d = TBS.delta_to_direction(0,ly)
         end
 
-        abscisse = (source - POS.new(x1,y1)).math_norm
+        abscisse = (source - POS.new(x1,y1)).euclidian_norm #added
         x1 = x1.round()
         y1 = y1.round()
         if x != x1 || y != y1
           pos = POS.new(x1,y1) #only an integer matters
-          x = x1
-          y = y1
+          x,y = x1,y1
           l.push(pos)
           dirs.push(d)
-          dist.push(abscisse)
+          dist.push(abscisse) #added
         end
       end #while
+      last_abscisse = dist[-1] + 2*(target-l[-1]).euclidian_norm
+      dist.push(last_abscisse)
       return l, dirs, dist
-    end #crossed_Positions
+    end #crossed_positions_axis
+  end #TBS
+
+  #============================================================================
+  # Interval -> class dealing with sets/intervals of float values
+  #============================================================================
+  class Interval
+    attr_reader :seg_list
+    #--------------------------------------------------------------------------
+    # initialize -> min,max are float values (assumes that min <= max) such that
+    # the interval corresponds to [min,max]
+    #--------------------------------------------------------------------------
+    def initialize(a,b)
+      #an array of pairs [a,b] such that:
+      # a <= b and
+      # for i in [0,size-2] @seg_list[i][1] < @seg_list[i+1][0]
+      @seg_list = []
+      @seg_list.push([a,b]) if a <= b
+    end
+
+    #--------------------------------------------------------------------------
+    # empty? -> return if the interval contains at least one element
+    #--------------------------------------------------------------------------
+    def empty?
+      @seg_list.empty?
+    end
+
+    #--------------------------------------------------------------------------
+    # contains? -> return if v (a float) is part of the interval
+    #--------------------------------------------------------------------------
+    def contains?(v)
+      i = index(v)
+      return false if i >= @seg_list.size
+      return @seg_list[i][0] <= v && @seg_list[i][1] >= v
+    end
+
+    #--------------------------------------------------------------------------
+    # min,max the min and max values of the segments
+    #--------------------------------------------------------------------------
+    def min; @seg_list[0][0]; end
+    def max; @seg_list[-1][1]; end
+
+    #--------------------------------------------------------------------------
+    # index -> return given v (a float) the index i in the interval where v
+    # is either in the segment [a,b] of index i or v is above the previous segment but
+    # below this one
+    # return:
+    # i if v is below segement i
+    # size if v is above maximum value
+    #--------------------------------------------------------------------------
+    def index(v)
+      i = @seg_list.index{|a,b| b >= v} #improve this into binary search if you intend to use big range
+      return i ? i : @seg_list.size
+    end
+
+    #--------------------------------------------------------------------------
+    # add -> add segment [a,b] to interval, may delete internally sub arrays
+    # the changed list will contain at most one more segment
+    # (case where [a,b] is not intersecting with any segment)
+    #--------------------------------------------------------------------------
+    def add(a,b)
+      return if a >= b
+      ia, ib = index(a), index(b)
+      return @seg_list.push([a,b]) if ia >= @seg_list.size #push new interval
+      if ia == ib
+        return @seg_list[ia][0] = a if @seg_list[ia][0] <= b #fuse intervals
+        @seg_list.insert(ia,[a,b]) #distinct intervals -> insert [a,b] here
+      else #ia < ib -> will fuse intervals for sure
+        @seg_list[ia][0] = a if @seg_list[ia][0] > a #a is not in any interval
+        b2 = b
+        b2 = @seg_list[ib][1] if ib < @seg_list.size && @seg_list[ib][0] <= b
+        @seg_list[ia][1] = b2
+        #clean redundant segments
+        max_slice = ib #the last id to remove
+        max_slice -= 1 if ib < @seg_list.size && @seg_list[ib][0] > b #exclude this interval if b was not in it
+        @seg_list.slice!(ia+1, max_slice-ia) #ex: ia = 2, ib = 4, this should be 3,1 or 3,2
+      end
+    end
+
+    #--------------------------------------------------------------------------
+    # remove -> remove segment [a,b] from the interval, may delete internally multiple
+    # arrays, the changed list will contain at most one more segment (case where
+    # [a,b] was inside another segment)
+    #--------------------------------------------------------------------------
+    def remove(a,b)
+      return if a >= b
+      #puts sprintf("Remove %f,%f from %s",a,b, to_s)
+      ia, ib = index(a), index(b)
+      return if ia >= @seg_list.size #don't remove anything
+      if ia == ib
+        if @seg_list[ia][0] <= b #reduce current interval
+          min_v = @seg_list[ia][0]
+          @seg_list[ia][0] = b
+          @seg_list.insert(ia,[min_v,a]) if a >= min_v#split interval
+        end
+        #else: interval does not exists so no need to remove it
+      else #ia < ib -> might remove many intervals
+        start_slice = ia
+        end_slice = ib
+        if @seg_list[ia][0] < a #a is inside its interval
+          @seg_list[ia][1] = a
+          start_slice += 1
+        end
+        @seg_list[ib][0] = b if ib < @seg_list.size && @seg_list[ib][0] <= b #b is inside its interval
+        #clean inbetween segments
+        @seg_list.slice!(start_slice, end_slice-start_slice) #ex: ia = 2, ib = 4, this should be 2,2 or 3,1
+      end
+      #puts sprintf("Got %s",to_s)
+    end
+
+
+    #--------------------------------------------------------------------------
+    # and -> intersection operation between two intervals self and other, return a new interval
+    #--------------------------------------------------------------------------
+    def and(other)
+      ret = self.dup
+      return ret if ret.empty? || other.empty?
+      ret.remove(ret.min-1,other.min) if ret.min < other.min
+      ret.remove(other.max,ret.max+1) if ret.max > other.max
+      other.seg_list.each_with_index do |seg,i|
+        next if i == 0 || i >= other.seg_list.size-1
+        prev_b = other.seg_list[i-1][1]
+        next_a = seg[0]
+        ret.remove(prev_b,next_a)
+      end
+      return ret
+    end
+
+    #--------------------------------------------------------------------------
+    # or -> union operation between two intervals self and other, return a new interval
+    #--------------------------------------------------------------------------
+    def or(other)
+      ret = self.dup
+      other.seg_list.each{|a,b| ret.add(a,b)}
+      return ret
+    end
+
+    #--------------------------------------------------------------------------
+    # to_s
+    #--------------------------------------------------------------------------
+    def to_s
+      s = "{"
+      @seg_list.each{|a,b| s += sprintf("[%f,%f], ",a,b)}
+      s += "}"
+      return s
+    end
   end
 end #$imported["TIM-TBS-Height"]
