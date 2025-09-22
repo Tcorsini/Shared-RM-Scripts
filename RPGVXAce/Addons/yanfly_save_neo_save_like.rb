@@ -1,20 +1,29 @@
 #==============================================================================
-# Neo Save System for VX ace v1.2
+# Neo Save System for VX ace v2
 # Recreates the Neo Save System on VX ace using Yanfly Save Manager and Zeus Bitmap Export
 #------------------------------------------------------------------------------
 # Author: Timtrack
-# date: 24/02/2025
-# modified the 30/04/2025
+# date: 11/09/2025
 # Requires: 
 # -Ace Save Engine 1.03 by Yanfly 
 # -Bitmap Export v5.4 by Zeus81
 #==============================================================================
 
 $imported = {} if $imported.nil?
+$imported["TIM-NeoSave"] = false
+
+if $imported["TIM-NeoSave"]
+  
 raise "Neo save requires Ace Save Engine by Yanfly!" unless $imported["YEA-SaveEngine"]
 raise "Neo save requires Zeus Bitmap Export!" unless $imported[:Zeus_Bitmap_Export]
-$imported["TIM-NeoSave"] = true
-
+#==============================================================================
+# Version History
+#------------------------------------------------------------------------------
+# 24/02/2025: Original release
+# 30/04/2025: v1.1 to access the take picture method from other scripts
+# 09/05/2025: v1.2 to have a black border around the screenshot
+# 11/09/2025: v2   removes the picture file and saves it directly into the 
+#                  savefile header instead (makes savefiles heavier)
 #==============================================================================
 # Description
 #------------------------------------------------------------------------------
@@ -32,31 +41,49 @@ $imported["TIM-NeoSave"] = true
 # Party members
 # Variables -> hidden deppending on the size of the picture
 #==============================================================================
-# Installation: put it after the required scripts and before main
+# Installation: put it after the required scripts and before main, configure
+# module NeoSave if you want to change the size of the picture.
 # Compatibility: with almost anything except scripts modifying file save display
 #==============================================================================
 # Terms of use: free for commercial and non-commercial project, 
 # credit is not mandatory but nice if you do
 #==============================================================================
 
+#==============================================================================
+# NeoSave -> you can change the constants here to modify the height of the 
+# picture, the size of the border around it or its color
+#==============================================================================
 module NeoSave
-  Picture_dir = "" #fill this if you use a subdir
-  Picture_location = "save_pic_%02d.png" #%02d is the id of the save file
-  SCREENSHOT_HEIGHT = 140
+  SCREENSHOT_HEIGHT = 140#200
   MAP_BORDER_COLOR = Color.new(0,0,0,200)
   MAP_BORDER_SIZE = 2 #in pixels
-  
-  def self.get_picture_name(file_index)
-    return sprintf(Picture_location,file_index+1)
-  end
 end #NeoSave
+
+#==============================================================================
+# Editing anything past this point is at your own risk
+#==============================================================================
+
+#==============================================================================
+# DataManager -> saves the screenshot into the savefile
+#==============================================================================
+module DataManager
+  #--------------------------------------------------------------------------
+  # alias method: self.make_save_header
+  #--------------------------------------------------------------------------
+  class <<self; alias neo_make_save_header make_save_header; end
+  def self.make_save_header
+    header = neo_make_save_header
+    header[:neo_save_screenshot] = Scene_Map.temp_bit_map#Marshal.load(Marshal.dump(Scene_Map.temp_bit_map))
+    header
+  end
+end # DataManager
 
 #==============================================================================
 # Window_FileStatus
 #==============================================================================
 class Window_FileStatus < Window_Base
   #--------------------------------------------------------------------------
-  # override method: draw_save_contents
+  # overwrite method: draw_save_contents
   #--------------------------------------------------------------------------
   def draw_save_contents
     #draw_save_slot(4, 0, contents.width/2-8)
@@ -75,7 +102,8 @@ class Window_FileStatus < Window_Base
   # new method: draw_map_picture
   #--------------------------------------------------------------------------
   def draw_map_picture(dx, dy, dw)
-    bitmap = Cache.load_bitmap(NeoSave::Picture_dir, NeoSave.get_picture_name(@current_index)) rescue return
+    bitmap = get_screenshot_bitmap
+    return unless bitmap
     shift_x = (bitmap.width - dw)/2
     shift_y = (bitmap.height - NeoSave::SCREENSHOT_HEIGHT)/2
     
@@ -87,37 +115,14 @@ class Window_FileStatus < Window_Base
     contents.blt(dx+d, dy+d, bitmap, rect, 255)
     bitmap.dispose
   end
+  
+  #--------------------------------------------------------------------------
+  # new method: get_screenshot_bitmap
+  #--------------------------------------------------------------------------
+  def get_screenshot_bitmap
+    @header[:neo_save_screenshot]
+  end
 end #Window_FileStatus
-
-#==============================================================================
-# Scene_File
-#==============================================================================
-class Scene_File < Scene_MenuBase
-  #--------------------------------------------------------------------------
-  # alias method: on_save_success
-  #--------------------------------------------------------------------------
-  alias neo_on_save_success on_save_success
-  def on_save_success
-    save_map_picture
-    neo_on_save_success
-  end
-  
-  #--------------------------------------------------------------------------
-  # alias method: on_delete_success
-  #--------------------------------------------------------------------------
-  alias neo_on_delete_success on_delete_success
-  def on_delete_success
-    File.delete(NeoSave::Picture_dir + NeoSave.get_picture_name(@file_window.index)) rescue nil
-    neo_on_delete_success
-  end
-  
-  #--------------------------------------------------------------------------
-  # new method: save_map_picture
-  #--------------------------------------------------------------------------
-  def save_map_picture
-    Scene_Map.temp_bit_map.export(NeoSave::Picture_dir + NeoSave.get_picture_name(@file_window.index))
-  end
-end #Scene_File
 
 #==============================================================================
 # Scene_Map
@@ -160,3 +165,5 @@ class Scene_Map < Scene_Base
     @@tmp_bitmap = Graphics.snap_to_bitmap
   end
 end #Scene_Map
+
+end

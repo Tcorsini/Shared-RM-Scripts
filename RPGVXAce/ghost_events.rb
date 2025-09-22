@@ -58,7 +58,7 @@ class Game_Event < Game_Character
   # new method: read_collide
   #--------------------------------------------------------------------------
   def read_collide
-    @collide_with_player = @list.any? {|command| command.code == 108 and command.parameters[0].include?(GHOST_EVENT::ACTIVE)} if @list
+    @collide_with_player = @list && @list.any? {|command| command.code == 108 && command.parameters[0].include?(GHOST_EVENT::ACTIVE)}
   end
 end #Game_Event
 

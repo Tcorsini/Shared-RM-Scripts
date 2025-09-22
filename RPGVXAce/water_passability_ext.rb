@@ -19,13 +19,13 @@ class Game_Map
   #--------------------------------------------------------------------------
   alias water_boat_passable? boat_passable? 
   def boat_passable?(x, y)
-    water_boat_passable?(x,y) or terrain_tag(x,y) == BoatShipPassability::TILETAG_WATER_PASSABLE
+    water_boat_passable?(x,y) || terrain_tag(x,y) == BoatShipPassability::TILETAG_WATER_PASSABLE
   end
   #--------------------------------------------------------------------------
   # * Determine if Passable by Ship
   #--------------------------------------------------------------------------
   alias water_ship_passable? ship_passable? 
   def ship_passable?(x, y)
-    water_ship_passable?(x, y) or terrain_tag(x,y) == BoatShipPassability::TILETAG_WATER_PASSABLE
+    water_ship_passable?(x, y) || terrain_tag(x,y) == BoatShipPassability::TILETAG_WATER_PASSABLE
   end
 end
