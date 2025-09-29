@@ -1,0 +1,17 @@
+Load order for my items scripts. Note that you don't need ALL 
+scripts, just follow the scripts requirements and this load 
+order:
+
+- Theo Allen's Limited Inventory
+- Hime's Instance Items
+- Hime's Core Inventory
+- Hime's Core Inventory - instance items patch
+- Hime's Actor Inventory
+- Hime's Actor Inventory - instance items patch
+- Hime's Actor Inventory Scenes
+
+- Shared items addon
+- Limited Inventory + Actor Inventory Compatibility patch
+- Instance Exceptions addon
+- Single Items Display
+- Discardability addon
