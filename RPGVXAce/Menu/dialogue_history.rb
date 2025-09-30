@@ -1,8 +1,13 @@
 #==============================================================================
-# Dialogue History
+# Dialogue History v1.1
 #------------------------------------------------------------------------------
 # Author: Timtrack
 # date: 30/09/2025
+#==============================================================================
+# Version History
+#------------------------------------------------------------------------------
+# 30/09/2025: Original release
+# 30/09/2025: v1.1 smoother sliding, no longer selecting windows
 #==============================================================================
 # Description: Records the last messages, choices, numbers entered, names given
 # to actors and items selected displays them if necessary or when loading a save.
@@ -80,6 +85,10 @@ module DialogueHistory
   #entries without having to control them, each message, choice, actor's name
   #change, item selected and number entered is a single entry
   MAX_HISTORY = 0
+  
+  #pixels per frame for sliding in dialogue history
+  SCROLL_SPEED = 5 #when up/down
+  SCROLL_SPEED_UP = 20 #when left/right or shift is pressed
 end #DialogueHistory
 
 #============================================================================
@@ -450,7 +459,6 @@ end #$imported["YEA-MessageSystem"]
 # Window_DialogueEntry
 #============================================================================
 class Window_DialogueEntry < Window_Message
-  attr_reader   :selected
   attr_reader   :entry
   #--------------------------------------------------------------------------
   # override method: initialize
@@ -569,23 +577,6 @@ class Window_DialogueEntry < Window_Message
     clear_flags
   end
   #--------------------------------------------------------------------------
-  # new method: selected=
-  #--------------------------------------------------------------------------
-  def selected=(selected)
-    @selected = selected
-    update_cursor
-  end
-  #--------------------------------------------------------------------------
-  # new method: update_cursor
-  #--------------------------------------------------------------------------
-  def update_cursor
-    if @selected
-      cursor_rect.set(0, 0, contents_width, contents_height)
-    else
-      cursor_rect.empty
-    end
-  end
-  #--------------------------------------------------------------------------
   # override method: process_escape_character
   #--------------------------------------------------------------------------
   def process_escape_character(code, text, pos)
@@ -610,7 +601,6 @@ class Scene_DialogueHistory < Scene_MenuBase
     create_help_window
     create_history_viewport
     create_history_windows
-    init_selection
   end
   #--------------------------------------------------------------------------
   # override method: terminate
@@ -667,35 +657,18 @@ class Scene_DialogueHistory < Scene_MenuBase
     update_window_selection
   end
   #--------------------------------------------------------------------------
-  # new method: init_selection
-  #--------------------------------------------------------------------------
-  def init_selection
-    return if @history_windows.empty?
-    @index = 0
-    @history_windows[@index].selected = true if @history_windows[@index]
-    self.index = 0
-  end
-  #--------------------------------------------------------------------------
   # new method: item_max
   #--------------------------------------------------------------------------
   def item_max
     $game_system.dialogue_recorder.list.size
   end
   #--------------------------------------------------------------------------
-  # new method: index
+  # new method: move_viewport
   #--------------------------------------------------------------------------
-  def index
-    @index
-  end
-  #--------------------------------------------------------------------------
-  # new method: index=
-  #--------------------------------------------------------------------------
-  def index=(index)
-    @index = [0,[index,item_max-1].min].max
-    w = @history_windows[@index]
-    center_y = w.y + w.total_height/2
+  def move_viewport(diff)
+    y = @history_viewport.oy + diff
     max_oy = @total_height-@history_viewport.rect.height
-    @history_viewport.oy = [0,[center_y - @history_viewport.rect.height/2, max_oy].min].max
+    @history_viewport.oy = [0,[y, max_oy].min].max
   end
   #--------------------------------------------------------------------------
   # new method: update_window_selection
@@ -709,6 +682,8 @@ class Scene_DialogueHistory < Scene_MenuBase
   # new method: on_ok
   #--------------------------------------------------------------------------
   def on_ok
+    Sound.play_cancel
+    return_scene
   end
   #--------------------------------------------------------------------------
   # new method: on_cancel
@@ -722,39 +697,38 @@ class Scene_DialogueHistory < Scene_MenuBase
   #--------------------------------------------------------------------------
   def update_cursor
     return if @history_windows.empty?
-    last_index = @index
-    cursor_down (Input.trigger?(:DOWN))  if Input.repeat?(:DOWN)
-    cursor_up   (Input.trigger?(:UP))    if Input.repeat?(:UP)
-    cursor_left (Input.trigger?(:LEFT))  if Input.repeat?(:LEFT)
-    cursor_right (Input.trigger?(:RIGHT)) if Input.repeat?(:RIGHT)
-    if @index != last_index
-      Sound.play_cursor
-      @history_windows[last_index].selected = false
-      @history_windows[@index].selected = true
-    end
+    #last_index = @index
+    cursor_down if Input.press?(:DOWN)
+    cursor_up if Input.press?(:UP)
+    cursor_left if Input.press?(:LEFT)
+    cursor_right if Input.press?(:RIGHT)
   end
   #--------------------------------------------------------------------------
   # new method: cursor_down
   #--------------------------------------------------------------------------
-  def cursor_down(wrap)
-    self.index = (@index + 1) % item_max if @index < item_max - 1 || wrap
+  def cursor_down
+    speed = DialogueHistory::SCROLL_SPEED
+    speed = DialogueHistory::SCROLL_SPEED_UP if Input.press?(:SHIFT)
+    move_viewport(speed)
   end
   #--------------------------------------------------------------------------
   # new method: cursor_up
   #--------------------------------------------------------------------------
-  def cursor_up(wrap)
-    self.index = (@index - 1 + item_max) % item_max if @index > 0 || wrap
+  def cursor_up
+    speed = DialogueHistory::SCROLL_SPEED
+    speed = DialogueHistory::SCROLL_SPEED_UP if Input.press?(:SHIFT)
+    move_viewport(-speed)
   end
   #--------------------------------------------------------------------------
   # new method: cursor_right
   #--------------------------------------------------------------------------
-  def cursor_right(wrap)
-    self.index += 3 || wrap
+  def cursor_right
+    move_viewport(DialogueHistory::SCROLL_SPEED_UP)
   end
   #--------------------------------------------------------------------------
   # new method: cursor_left
   #--------------------------------------------------------------------------
-  def cursor_left(wrap) 
-    self.index -= 3 || wrap
+  def cursor_left
+    move_viewport(-DialogueHistory::SCROLL_SPEED_UP)
   end
 end #Scene_DialogueHistory
