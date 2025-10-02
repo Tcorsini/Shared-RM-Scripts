@@ -1,8 +1,8 @@
 #==============================================================================
-# Dialogue History v1.2
+# Dialogue History v1.3
 #------------------------------------------------------------------------------
 # Author: Timtrack
-# date: 01/10/2025
+# date: 02/10/2025
 #==============================================================================
 # Version History
 #------------------------------------------------------------------------------
@@ -11,9 +11,12 @@
 # 01/10/2025: v1.2 fixing dispose order, added more general support for window
 #                  positionning, messages are no longer displayed in history
 #                  when they are still on the map
+# 02/10/2025: v1.3 added text scroll saving and fixed crash at the end of text
+#                  scroll when dialogue history 1.2 stores messages.
 #==============================================================================
-# Description: Records the last messages, choices, numbers entered, names given
-# to actors and items selected displays them if necessary or when loading a save.
+# Description: Records the last messages, scroll text, choices, numbers entered, 
+# names given to actors and items selected displays them if necessary or when 
+# loading a save.
 #
 # Available script calls:
 #
@@ -74,6 +77,7 @@ module DialogueHistory
   RECORD_NUMBERS = true
   RECORD_NAMES = true
   RECORD_ITEMS = true
+  RECORD_SCROLLTEXT = true
   
   #change the default texts here (message characters supported):
   module Vocab
@@ -120,6 +124,10 @@ class Dialogue_Entry
   #--------------------------------------------------------------------------
   def is_message?; false; end
   #--------------------------------------------------------------------------
+  # method: is_scrolltext? -> tests if ScrollText_Entry object
+  #--------------------------------------------------------------------------
+  def is_scrolltext?; false; end
+  #--------------------------------------------------------------------------
   # method: valid? -> tests if Dialogue_Entry can be displayed
   #--------------------------------------------------------------------------
   def valid?; true; end
@@ -136,6 +144,34 @@ class Message_PostData
     @y = msg_window.y
   end
 end #Message_Entry
+
+#============================================================================
+# ScrollText_Entry -> stores a message data
+#============================================================================
+class ScrollText_Entry < Dialogue_Entry
+  attr_reader :data, :post_data
+  def initialize
+    #puts "recording scrolltext..."
+    @data = $game_message.dup
+    @data.choice_proc = nil #to allow saving the data
+    @data.background = 2 #no background
+    @rows = Window_Base.count_lines(text)#rows
+  end
+  #--------------------------------------------------------------------------
+  # new method: add_message_post_data
+  #--------------------------------------------------------------------------
+  def add_message_post_data
+    @valid = true
+  end
+  #--------------------------------------------------------------------------
+  # override methods: width, rows, text, is_scrolltext?, valid?
+  #--------------------------------------------------------------------------
+  def width; Graphics.width; end
+  def rows; @rows; end
+  def text; @data.all_text; end
+  def is_scrolltext?; true; end
+  def valid?; @valid; end
+end #ScrollText_Entry
 
 #============================================================================
 # Message_Entry -> stores a message data
@@ -247,7 +283,7 @@ end #Value_Entry
 # Dialogue_Recorder -> the history of dialogues and other inputs
 #============================================================================
 class Dialogue_Recorder
-  attr_accessor :record_messages, :record_choices, :record_numbers, :record_items, :record_names
+  attr_accessor :record_messages, :record_choices, :record_numbers, :record_items, :record_names, :record_scrolltext
   attr_accessor :max_history, :access
   #--------------------------------------------------------------------------
   # method: initialize
@@ -265,6 +301,7 @@ class Dialogue_Recorder
     @record_numbers = DialogueHistory::RECORD_NUMBERS
     @record_items = DialogueHistory::RECORD_ITEMS
     @record_names = DialogueHistory::RECORD_NAMES
+    @record_scrolltext = DialogueHistory::RECORD_SCROLLTEXT
   end
   #--------------------------------------------------------------------------
   # methods: start/stop -> to start or stop the saving of the dialogues
@@ -339,18 +376,20 @@ class Game_Interpreter
     $game_system.dialogue_recorder
   end
   #--------------------------------------------------------------------------
-  # alias method: wait_for_message
+  # alias method: wait_for_message -> catches messages and scrolltext
   #--------------------------------------------------------------------------
   alias record_wait_for_message wait_for_message
   def wait_for_message
-    if dialogue_recorder.record_messages && dialogue_recorder.recording? && $game_message.has_text?
-      entry = Message_Entry.new
-      dialogue_recorder.add_entry(entry)
-      record_wait_for_message
-      entry.add_message_post_data
-    else
-      record_wait_for_message
-    end
+    return record_wait_for_message unless dialogue_recorder.recording? && $game_message.has_text?
+    bscroll = $game_message.scroll_mode && dialogue_recorder.record_scrolltext
+    bmsg = !$game_message.scroll_mode && dialogue_recorder.record_messages
+    return record_wait_for_message unless bscroll || bmsg
+    entry = nil
+    entry = Message_Entry.new if bmsg
+    entry = ScrollText_Entry.new if bscroll
+    dialogue_recorder.add_entry(entry)
+    record_wait_for_message
+    entry.add_message_post_data
   end
   #--------------------------------------------------------------------------
   # alias method: setup_choices -> alters the Proc to add the entry
@@ -366,6 +405,21 @@ class Game_Interpreter
     }
   end
 end #Game_Interpreter
+
+#============================================================================
+# Window_Base
+#============================================================================
+class Window_Base < Window
+  #--------------------------------------------------------------------------
+  # new class method: count_lines
+  #--------------------------------------------------------------------------
+  def self.count_lines(text)
+    w = Window_Base.new(0,0,0,0)
+    c = w.convert_escape_characters(text).lines.count
+    w.dispose
+    return c
+  end
+end #Window_NumberInput
 
 #============================================================================
 # Window_NumberInput
@@ -620,7 +674,7 @@ class Window_DialogueEntry < Window_Message
   # override method: update_background -> background is defined by @entry
   #--------------------------------------------------------------------------
   def update_background
-    @background = @entry.data.background if @entry.is_message?
+    @background = @entry.data.background if @entry.is_message? || @entry.is_scrolltext?
     self.opacity = @background == 0 ? 255 : 0
   end
   #--------------------------------------------------------------------------
