@@ -1,13 +1,16 @@
 #==============================================================================
-# Dialogue History v1.1
+# Dialogue History v1.2
 #------------------------------------------------------------------------------
 # Author: Timtrack
-# date: 30/09/2025
+# date: 01/10/2025
 #==============================================================================
 # Version History
 #------------------------------------------------------------------------------
 # 30/09/2025: Original release
 # 30/09/2025: v1.1 smoother sliding, no longer selecting windows
+# 01/10/2025: v1.2 fixing dispose order, added more general support for window
+#                  positionning, messages are no longer displayed in history
+#                  when they are still on the map
 #==============================================================================
 # Description: Records the last messages, choices, numbers entered, names given
 # to actors and items selected displays them if necessary or when loading a save.
@@ -116,13 +119,29 @@ class Dialogue_Entry
   # method: is_message? -> tests if Message_Entry object
   #--------------------------------------------------------------------------
   def is_message?; false; end
+  #--------------------------------------------------------------------------
+  # method: valid? -> tests if Dialogue_Entry can be displayed
+  #--------------------------------------------------------------------------
+  def valid?; true; end
 end #Dialogue_Entry
+
+#============================================================================
+# Message_PostData -> stores positionning among other things that can only be
+# calculated after the new page was drawn from the previous message, only
+# useful for patches like with ATS: Face Options
+#============================================================================
+class Message_PostData
+  attr_accessor :y
+  def initialize(msg_window)
+    @y = msg_window.y
+  end
+end #Message_Entry
 
 #============================================================================
 # Message_Entry -> stores a message data
 #============================================================================
 class Message_Entry < Dialogue_Entry
-  attr_reader :data
+  attr_reader :data, :post_data
   def initialize
     #puts "recording msg..."
     @data = $game_message.dup
@@ -135,12 +154,20 @@ class Message_Entry < Dialogue_Entry
     end
   end
   #--------------------------------------------------------------------------
-  # override methods: width, rows, text, is_message?
+  # new method: add_message_post_data
+  #--------------------------------------------------------------------------
+  def add_message_post_data
+    @post_data = $game_temp.message_post_data.dup
+    @valid = true
+  end
+  #--------------------------------------------------------------------------
+  # override methods: width, rows, text, is_message?, valid?
   #--------------------------------------------------------------------------
   def width; @width; end
   def rows; @rows; end
   def text; @data.all_text; end
   def is_message?; true; end
+  def valid?; @valid; end
 end #Message_Entry
 
 #============================================================================
@@ -220,7 +247,6 @@ end #Value_Entry
 # Dialogue_Recorder -> the history of dialogues and other inputs
 #============================================================================
 class Dialogue_Recorder
-  attr_reader :list
   attr_accessor :record_messages, :record_choices, :record_numbers, :record_items, :record_names
   attr_accessor :max_history, :access
   #--------------------------------------------------------------------------
@@ -267,6 +293,12 @@ class Dialogue_Recorder
     @list.shift(@list.size - @max_history) if @max_history && @list.size > @max_history
   end
   #--------------------------------------------------------------------------
+  # method: list -> gets the valid entries
+  #--------------------------------------------------------------------------
+  def list
+    @list.select{|e| e.valid?}
+  end
+  #--------------------------------------------------------------------------
   # method: display -> calls the history menu
   #--------------------------------------------------------------------------
   def display
@@ -290,6 +322,13 @@ class Game_System
 end #Game_System
 
 #============================================================================
+# Game_Temp
+#============================================================================
+class Game_Temp
+  attr_accessor :message_post_data
+end #Game_Temp
+
+#============================================================================
 # Game_Interpreter
 #============================================================================
 class Game_Interpreter
@@ -304,8 +343,14 @@ class Game_Interpreter
   #--------------------------------------------------------------------------
   alias record_wait_for_message wait_for_message
   def wait_for_message
-    dialogue_recorder.add_entry(Message_Entry.new) if dialogue_recorder.record_messages && dialogue_recorder.recording? && $game_message.has_text?
-    record_wait_for_message
+    if dialogue_recorder.record_messages && dialogue_recorder.recording? && $game_message.has_text?
+      entry = Message_Entry.new
+      dialogue_recorder.add_entry(entry)
+      record_wait_for_message
+      entry.add_message_post_data
+    else
+      record_wait_for_message
+    end
   end
   #--------------------------------------------------------------------------
   # alias method: setup_choices -> alters the Proc to add the entry
@@ -366,6 +411,20 @@ class Window_KeyItem < Window_ItemList
     end
   end
 end #Window_KeyItem
+
+#============================================================================
+# Window_Message
+#============================================================================
+class Window_Message < Window_Base
+  #--------------------------------------------------------------------------
+  # alias method: new_page -> saves the post-data in a temporary object
+  #--------------------------------------------------------------------------
+  alias record_new_page new_page
+  def new_page(text, pos)
+    record_new_page(text,pos)
+    $game_temp.message_post_data = Message_PostData.new(self)
+  end
+end #Window_Message
 
 #============================================================================
 # Scene_Name
@@ -490,8 +549,34 @@ class Window_DialogueEntry < Window_Message
   # Yanfly's message system is used)
   #--------------------------------------------------------------------------
   def total_height
-    return height unless $imported["YEA-MessageSystem"] && !@name_text.empty?
-    return height + @name_window.height
+    top_h + height + bottom_h
+  end
+  #--------------------------------------------------------------------------
+  # new method: offset_y -> for the parent to know where to put this window 
+  # after the last one
+  #--------------------------------------------------------------------------
+  def offset_y
+    top_h
+  end
+  #--------------------------------------------------------------------------
+  # new method: active_window_list (takes care of additional windows)
+  #--------------------------------------------------------------------------
+  def active_window_list
+    wl = [self]
+    wl.push(@name_window) if $imported["YEA-MessageSystem"] && !@name_text.empty?
+    return wl
+  end
+  #--------------------------------------------------------------------------
+  # new method: top_h -> height above the message window
+  #--------------------------------------------------------------------------
+  def top_h
+    active_window_list.collect{|w| self.y - w.y}.max
+  end
+  #--------------------------------------------------------------------------
+  # new method: bottom_h -> height below the message window
+  #--------------------------------------------------------------------------
+  def bottom_h
+    active_window_list.collect{|w| (w.y+w.height) - (self.y+height)}.max
   end
   #--------------------------------------------------------------------------
   # override method: visible_line_number -> dynamic line numbers, compatible
@@ -547,14 +632,6 @@ class Window_DialogueEntry < Window_Message
     @name_window.viewport = v if $imported["YEA-MessageSystem"]
   end
   #--------------------------------------------------------------------------
-  # new method: offset_y -> for the parent to know where to put this window 
-  # after the last one
-  #--------------------------------------------------------------------------
-  def offset_y
-    #return 0 unless $imported["YEA-MessageSystem"]
-    return total_height - height
-  end
-  #--------------------------------------------------------------------------
   # override method: y=
   #--------------------------------------------------------------------------
   def y=(new_y)
@@ -607,8 +684,8 @@ class Scene_DialogueHistory < Scene_MenuBase
   #--------------------------------------------------------------------------
   def terminate
     super
-    @history_viewport.dispose
     @history_windows.each {|window| window.dispose }
+    @history_viewport.dispose
   end
   #--------------------------------------------------------------------------
   # override method: create_help_window
