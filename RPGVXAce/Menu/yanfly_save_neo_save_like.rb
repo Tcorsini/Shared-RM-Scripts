@@ -10,7 +10,7 @@
 #==============================================================================
 
 $imported = {} if $imported.nil?
-$imported["TIM-NeoSave"] = false
+$imported["TIM-NeoSave"] = true
 
 if $imported["TIM-NeoSave"]
   

@@ -6,7 +6,9 @@
 # Requires: TheoAllen - Limited Inventory and Hime's Actor Inventory
 # Supports Hime's Instance Items
 #==============================================================================
-# Note: tested with the following script order:
+# Description: a compatibility patch between the mentionned scripts.
+#
+# Tested with the following script order:
 # Limited Inventory
 # Instance Items*
 # Core - Inventory

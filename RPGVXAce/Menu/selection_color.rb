@@ -3,8 +3,8 @@
 #------------------------------------------------------------------------------
 # Author: Timtrack
 # date: 12/06/2025
-# Requires: replaces the default text color with TEXT_SELECTED_COLOR_ID when an
-# item is selected in the window
+# Description: replaces the default text color with TEXT_SELECTED_COLOR_ID when 
+# an item is selected in the window
 #==============================================================================
 
 #==============================================================================

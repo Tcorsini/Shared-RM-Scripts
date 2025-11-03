@@ -5,6 +5,12 @@
 # date: 02/06/2025
 # Requires: Hime's Actor Inventory and Actor Inventory Scenes
 #==============================================================================
+# Description: An addon to Hime's Actor Inventory, allow some items, weapons
+# or armors to be shared among all inventories.
+# To do so, put in the object's notetag <shared_inventory>
+# You can also automaties the sharing of key items by setting SHARED_KEY_ITEMS
+# to true
+#==============================================================================
 # Installation: put this below Hime's scripts
 #==============================================================================
 # Terms of use: free for commercial and non-commercial projects

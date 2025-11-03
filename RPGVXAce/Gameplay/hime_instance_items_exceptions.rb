@@ -7,6 +7,10 @@
 # Should be compatible with Hime's Core - Inventory, Actor Inventory and 
 # TheoAllen's Limited Inventory
 #==============================================================================
+# Description: You can now decide that some items weapons or armors are not
+# instanciated with Hime's script, to do so, put in their notetags:
+# <no_instance>
+#==============================================================================
 # Installation: put this below all the cited scripts, if you use my patch
 # for them, put this script below the patch.
 #==============================================================================
