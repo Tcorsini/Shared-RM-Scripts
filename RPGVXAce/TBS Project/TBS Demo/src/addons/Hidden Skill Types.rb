@@ -1,5 +1,5 @@
 #==============================================================================
-# Hidden Skill Types v1.1
+# Hidden Skill Types v1.2
 #------------------------------------------------------------------------------
 # Author: Timtrack
 # date: 28/03/2025
@@ -26,6 +26,7 @@ $imported["TIM-HiddenSkillTypes"] = true
 #------------------------------------------------------------------------------
 # 27/02/2025: start and end of HST
 # 28/03/2025: v1.1  bugfix for skill type reading
+# 02/10/2025: v1.2  moved lists inside skills and items objects
 #==============================================================================
 # Installation: put it above Main and any other script using it
 #==============================================================================
@@ -37,37 +38,14 @@ $imported["TIM-HiddenSkillTypes"] = true
 #==============================================================================
 
 module HST
-  SKILL_TYPES = {}
-  ITEM_TYPES = {}
-
   module REGEXP
     TYPE          = /<stype:\s*(\d+(?:\s*,\s*\d+)*)>/i
   end # REGEXP
-
-  def self.item_types(item_id)
-    return [0] unless ITEM_TYPES[item_id]
-    return ITEM_TYPES[item_id].include?(0) ? ITEM_TYPES[item_id] : [0] + ITEM_TYPES[item_id]
-  end
-
-  def self.skill_types(skill_id)
-    sid = $data_skills[skill_id].stype_id
-    return [sid] unless SKILL_TYPES[skill_id]
-    return SKILL_TYPES[skill_id].include?(sid) ? SKILL_TYPES[skill_id] : [sid] + SKILL_TYPES[skill_id]
-  end
-
-  def self.item_of_type?(item_id, type)
-    return HST.item_types(item_id).include?(type)
-  end
-
-  def self.skill_of_type?(skill_id,type)
-    return HST.skill_types(skill_id).include?(type)
-  end
 end #HST
 
 #==============================================================================
 # ■ DataManager
 #==============================================================================
-
 module DataManager
   #--------------------------------------------------------------------------
   # alias method: load_database
@@ -77,7 +55,6 @@ module DataManager
     load_database_hst
     load_notetags_hst
   end
-
   #--------------------------------------------------------------------------
   # new method: load_notetags_hst
   #--------------------------------------------------------------------------
@@ -93,48 +70,46 @@ module DataManager
 end # DataManager
 
 #==============================================================================
-# ■ RPG::Item
+# ■ RPG::UsableItem
 #==============================================================================
-
-class RPG::Item
+class RPG::UsableItem
+  attr_accessor :stype_list
+  #--------------------------------------------------------------------------
+  # new method: default_stype
+  #--------------------------------------------------------------------------
+  def default_stype; 0; end
+  #--------------------------------------------------------------------------
+  # new method: has_type?
+  #--------------------------------------------------------------------------
+  def has_type?(stype)
+    stype_list.include?(stype)
+  end
   #--------------------------------------------------------------------------
   # common cache: load_notetags_jst
   #--------------------------------------------------------------------------
   def load_notetags_hst
+    @stype_list = [default_stype]
     #---
     self.note.split(/[\r\n]+/).each { |line|
       case line
       #---
       when HST::REGEXP::TYPE
         l = []
-        $1.scan(/\d+/).each { |num| l.push(num.to_i) if num.to_i > 0 }
-        HST::ITEM_TYPES[id] = l
+        $1.scan(/\d+/).each { |num| @stype_list.push(num.to_i) if num.to_i > 0 }
       #---
       end
     } # self.note.split
     #---
   end
-end # RPG::Item
+end #RPG::UsableItem
 
 #==============================================================================
 # ■ RPG::Skill
 #==============================================================================
 class RPG::Skill
   #--------------------------------------------------------------------------
-  # common cache: load_notetags_hst
+  # override method: default_stype
   #--------------------------------------------------------------------------
-  def load_notetags_hst
-    #---
-    self.note.split(/[\r\n]+/).each { |line|
-      case line
-      #---
-      when HST::REGEXP::TYPE
-        l = []
-        $1.scan(/\d+/).each { |num| l.push(num.to_i) if num.to_i > 0 }
-        HST::SKILL_TYPES[id] = l
-      #---
-      end
-    } # self.note.split
-    #---
-  end
-end # RPG::Item
+  def default_stype; @stype_id; end
+  def stype_list; super; end
+end # RPG::Skill

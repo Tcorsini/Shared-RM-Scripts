@@ -3,11 +3,13 @@
 #------------------------------------------------------------------------------
 # Author: Timtrack
 # date: 12/03/2025
-# Requires: [TBS] by Timtrack or any script that adds on_turn_start method to Game_Battler
+# Requires: [TBS] by Timtrack or any script that adds on_turn_start method to
+# Game_Battler
 #==============================================================================
 
 $imported = {} if $imported.nil?
 $imported["TIM-TurnStartStates"] = true #set to false if you wish to disable it
+if $imported["TIM-TurnStartStates"]
 
 #==============================================================================
 # Description
@@ -29,68 +31,77 @@ module TurnStartStates
     RM_ON_TURN_STARTS       = /<remove_on_turn_starts>/i
   end
 
-  #the id should be different from 0,1,2 as they are used by None, on_action_end and on_turn_end
-  #if other scripts are changing attribute auto_removal_timing from RPG::State, then you should change this value to a free one
+  #the id should be different from 0,1,2 as they are used by None,
+  # on_action_end, and on_turn_end
+  #if other scripts are changing attribute auto_removal_timing from RPG::State,
+  # then you should change this value to an available one
   TURN_START_RM_ID = 3
 end
 
-if $imported["TIM-TurnStartStates"]
-  #============================================================================
-  # DataManager
-  #============================================================================
-  module DataManager
-    #--------------------------------------------------------------------------
-    # alias method: load_database
-    #--------------------------------------------------------------------------
-    class <<self; alias load_database_tss load_database; end
-    def self.load_database
-      load_database_tss
-      load_notetags_tss
-    end
+#============================================================================
+# Don't edit anything past this point unless you know what you are doing!
+#============================================================================
 
-    #--------------------------------------------------------------------------
-    # new method: load_notetags_tss
-    #--------------------------------------------------------------------------
-    def self.load_notetags_tss
-      for s in $data_states
-        next if s.nil?
-        s.load_notetags_tss
-      end
-    end
-  end # DataManager
+#============================================================================
+# DataManager
+#============================================================================
+module DataManager
+  #--------------------------------------------------------------------------
+  # alias method: load_database
+  #--------------------------------------------------------------------------
+  class <<self; alias load_database_tss load_database; end
+  def self.load_database
+    load_database_tss
+    load_notetags_tss
+  end
 
-  #============================================================================
-  # RPG::State
-  #============================================================================
-  class RPG::State
-    #--------------------------------------------------------------------------
-    # common cache: load_notetags_height
-    #--------------------------------------------------------------------------
-    def load_notetags_tss
-      #---
-      self.note.split(/[\r\n]+/).each { |line|
-        case line
-        #---
-        when TurnStartStates::REGEXP::RM_ON_TURN_STARTS
-          @auto_removal_timing = TurnStartStates::TURN_START_RM_ID
-        end
-        #---
-      } # self.note.split
-      #---
-    end
-  end # RPG::States
-
-  #============================================================================
-  # Game_Battler
-  #============================================================================
-  class Game_Battler
-    #--------------------------------------------------------------------------
-    # alias method: on_turn_start -> assumes that on_turn_start is already defined!
-    #--------------------------------------------------------------------------
-    alias on_turn_start_tss on_turn_start
-    def on_turn_start
-      remove_states_auto(TurnStartStates::TURN_START_RM_ID)
-      on_turn_start_tss
+  #--------------------------------------------------------------------------
+  # new method: load_notetags_tss
+  #--------------------------------------------------------------------------
+  def self.load_notetags_tss
+    for s in $data_states
+      next if s.nil?
+      s.load_notetags_tss
     end
   end
+end # DataManager
+
+#============================================================================
+# RPG::State
+#============================================================================
+class RPG::State
+  #--------------------------------------------------------------------------
+  # common cache: load_notetags_height
+  #--------------------------------------------------------------------------
+  def load_notetags_tss
+    #---
+    self.note.split(/[\r\n]+/).each { |line|
+      case line
+      #---
+      when TurnStartStates::REGEXP::RM_ON_TURN_STARTS
+        @auto_removal_timing = TurnStartStates::TURN_START_RM_ID
+      end
+      #---
+    } # self.note.split
+    #---
+  end
+end # RPG::States
+
+#============================================================================
+# Game_Battler
+#============================================================================
+class Game_Battler
+  unless method_defined?(:on_turn_start)
+    def on_turn_start; end #define dummy method if undefined, still not used
+  end
+  #--------------------------------------------------------------------------
+  # alias method: on_turn_start -> assumes that on_turn_start is already
+  # defined!
+  #--------------------------------------------------------------------------
+  alias on_turn_start_tss on_turn_start
+  def on_turn_start
+    remove_states_auto(TurnStartStates::TURN_START_RM_ID)
+    on_turn_start_tss
+  end
+end
 end #imported TIM-TurnStartStates

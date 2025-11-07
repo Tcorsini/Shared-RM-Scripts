@@ -1,21 +1,23 @@
 #==============================================================================
-# TBS Event Triggers v1.2
+# TBS Event Triggers v2
 #------------------------------------------------------------------------------
 # Author: Timtrack
-# date: 09/04/2025
+# date: 24/09/2025
 # Requires: [TBS] by Timtrack
 #==============================================================================
 
 $imported = {} if $imported.nil?
-$imported["TIM-TBS-EventTriggers"] = false #set to false if you wish to disable the modifications
+$imported["TIM-TBS-EventTriggers"] = true #set to false if you wish to disable the modifications
 
 #==============================================================================
 # Updates
 #------------------------------------------------------------------------------
-# 29/03/2025: first version
-# 03/04/2025: events are now linked to battlers when calling on_battle_start
+# 29/03/2025: v1.0 - first version
+# 03/04/2025: v1.1 - events are now linked to battlers when calling on_battle_start
 #             instead of tbs_entrance, turn_start events trigger after count update
-# 09/04/2025: now supports help_window from core v0.7
+# 09/04/2025: v1.2 -  now supports help_window from core v0.7
+# 24/09/2025: v2.0 - event triggers are now labels for better use, added more
+#                    global triggers related to state addition and deletion
 #==============================================================================
 # Description
 #------------------------------------------------------------------------------
@@ -31,27 +33,33 @@ $imported["TIM-TBS-EventTriggers"] = false #set to false if you wish to disable 
 # Any battler around the event skill range will get the skill,
 # you may forbid some battler to get the skill by disactivating
 # the skill type or the skill itself:
-# <tbs_give_skill> x
+# <tbs_give_skill x>
 #
 # You may link a team or a move_type to an event for crossing rules:
-# <tbs_team> id
-# <tbs_move_type> move_type
+# <tbs_team x>
+# <tbs_move_type x>
 # ex:
-# <tbs_team> 2
-# <tbs_move_type> :ground
+# <tbs_team 2>
+# <tbs_move_type :ground>
 #
-# Event pages can store subparts triggering under some conditions.
-# The list of triggers is in two parts:
+# Event pages can now be called and jump to specific labels under some
+# conditions on the labels names:
 #
 # Global triggers (like troop events):
 # On global turn start (exactly like troop triggers on turn starts)
 # <tbs_on_turn_start>
 # On battler turn start (each time a battler starts its local turn)
-# <tbs_on_bat_turn_start>
+# <tbs_on_bat_start>
 # On battler turn end (each time a battler ends its local turn)
-# <tbs_on_bat_turn_end>
-# On battler add a state
-# <tbs_on_bat_add_state>
+# <tbs_on_bat_end>
+# On a battler getting any state
+# <tbs_on_add_state>
+# On a battler getting state x
+# <tbs_on_astate x>
+# On a battler losing any state
+# <tbs_on_rm_state>
+# On a battler losing state x
+# <tbs_on_rstate x>
 # The data of the triggers (battler, state got) are stored in @trigger_params
 # to catch by the interpreter.
 #
@@ -63,26 +71,28 @@ $imported["TIM-TBS-EventTriggers"] = false #set to false if you wish to disable 
 # On battler leave (each time a battler leaves the position of this event, won't work on follow bat)
 # <tbs_on_bat_leave>
 # On skill (each time a specific skill's area touches this event)
-# <tbs_on_skill_here> x
+# <tbs_on_skill x>
 # On item (each time a specific item's area touches this event)
-# <tbs_on_item_here> x
+# <tbs_on_item x>
 #
-# All triggers (Global and Local) must be closed by the following comment:
-# </tbs>
-# Your event's page should look like this:
+# Your event's pages may look like this:
 #
-# Comment: <tbs_trigger>
-# Instructions
-# Comment: </tbs>
 # ...
-# Comment: <tbs_trigger2>
+# exit event
+# label: <tbs_trigger>
 # Instructions
-# Comment: </tbs>
+# exit event
+# ...
+# label: <tbs_trigger2>
+# Instructions
+# exit event
+# ...
+# label: <tbs_trigger3>
+# label: <tbs_trigger4>
+# Instructions
+# exit event
 # ...
 #
-# Anything between the tbs_trigger and </tbs> will run only if such trigger is
-# activated during tbs battle.
-# Instructions outside will run only if the event is called in a vanilla way.
 #==============================================================================
 # Terms of use: same as TBS project
 #==============================================================================
@@ -134,6 +144,8 @@ $imported["TIM-TBS-EventTriggers"] = false #set to false if you wish to disable 
 #      introduces submodules EVENTS and TRIGGERS
 #   class TBS_PageData
 #      stores event's page triggers and other tbs data
+#   class TBS::Trigger_Data
+#      stores triggers type for automatisation of label checking
 #==============================================================================
 
 if $imported["TIM-TBS-EventTriggers"]
@@ -145,83 +157,117 @@ module TBS
   #icon and cost, else, will only display its name.
   DRAW_SKILL_ICONS = false
 
-  module EVENTS
+  module EVENT_TRIGGERS
     DEFAULT_MOVE_TYPE = :wall
     DEFAULT_TEAM = TEAMS::TEAM_NEUTRALS
     #set to false if you don't want a following event to react to its battler
     #moving, else, it will trigger each cell the battler moves to
     FOLLOW_TRIGGERS_REACH_LEAVE_SELF = false
-    #if at the start of battle, the battler is here, then the event WILL follow the battler forever
-    FOLLOW_BATTLER = "<tbs_follow_bat>"
-    #will give skill x to the battlers in the range of the skill,
-    #the skill will appear as a custom command
-    #if the battlers leave the range the skill is removed from them.
-    GIVE_SKILL = "<tbs_give_skill>" #x
-    #team
-    TEAM = "<tbs_team>" #x
-    #move_type
-    MOVE_TYPE = "<tbs_move_type>" #x
-  end #EVENTS
+  end #EVENT_TRIGGERS
 
-  module TRIGGERS
-    #Triggers are list of commands run under specific conditions in tbs battles
-    #when the map is loaded or the events are refreshed, the system will take
-    #every command between <tbs cmd> and </tbs> in event comments, remove them from
-    #the event and store them elsewhere when the event is triggered
-    #
-    #You may have multiple triggers in the same event page but:
-    #-try to keep a low number of global triggers, the more, the slower the system will run
-    #-DO NOT stack the triggers in the event page, start a trigger, end it, start the next one etc.
-    #-don't try to leave the event commands inside a trigger with gotos and labels, this behavior is not supported
-    module GLOBAL
-      #when a global turn starts
-      ON_GLOBAL_TURN_START = "<tbs_on_turn_start>"
-      #when any battler starts its turn
-      ON_BATTLER_TURN_START = "<tbs_on_bat_turn_start>" #data: bat
-      #when any battler ends its turn
-      ON_BATTLER_TURN_END = "<tbs_on_bat_turn_end>" #data: bat
-      #when any battler gets a state
-      ON_BATTLER_ADD_STATE = "<tbs_on_bat_add_state>" #data: bat, state
-    end #GLOBAL
+  module REGEXP
+    #These are the regexp found inside events comments, they are linked to their
+    #page, changing page mid-battle will change its properties
+    module EVENT_COMMENTS
+      #will follow the battler that starts the battle on this event
+      FOLLOW_BATTLER = /^<tbs_follow_bat>/i
+      #will give skill x to the battlers in the range of the skill,
+      #the skill will appear as a custom command
+      #if the battlers leave the range the skill is removed from them.
+      GIVE_SKILL = /^<tbs_give_skill (\d+)>/i
+      #team: set the team of the event, useful for passability and obstacles, does
+      #not affect the battler on it!
+      TEAM = /^<tbs_team (\d+)>/i
+      #move_type: set the move_type of the event, useful for passability and obstacles
+      MOVE_TYPE = /^<tbs_move_type (:.+)>/i
+    end #EVENT_LABELS
 
-    module LOCAL
-      #if the cursor in select/place mode clicks on this event,
-      #triggers before the battler selection if any
-      ON_CURSOR_OK = "<tbs_on_cursor_ok>"
-      #when a battler reaches this event
-      ON_BATTLER_REACH = "<tbs_on_bat_reach>" #data: bat
-      #when a battler leaves this event
-      ON_BATTLER_LEAVE = "<tbs_on_bat_leave>" #data: bat
-      #when skill %d is cast upon this cell (among others)
-      ON_SKILL = "<tbs_on_skill_here>" # sid
-      #when item %d is cast upon this cell
-      ON_ITEM = "<tbs_on_item_here>" # iid
-    end #LOCAL
-    #anything past this point will be ignored by the current trigger
-    TRIGGER_END = "</tbs>"
-  end #TRIGGERS
+    module EVENT_LABELS
+      #Triggers are commands run under specific conditions in tbs battles
+      #when the map is loaded or the events are refreshed, the system will check
+      #any event with special labels recognized as triggers and call the events
+      #by jumping to the right label whenever the trigger is activated
+      #
+      #You have to understand how labels and jump to labels work in order to use
+      #triggers. You may have multiple triggers in the same event page but try
+      #to keep a low numbers of global triggers! The more you have, the slower
+      #the battle will run!
+      #
+      #Due to editor's limit, labels names cannot be longer than 20 characters,
+      #for labels with integers as parameters, count at least 3 characters out
+      #(to deal with hundreds indices from the database)
+      module GLOBAL
+        #when a global turn starts
+        ON_GLOBAL_TURN_START = /^<tbs_on_turn_start>/i
+        #when any battler starts its turn
+        ON_BATTLER_TURN_START = /^<tbs_on_bat_start>/i#"<tbs_on_bat_turn_start>" #data: bat
+        #when any battler ends its turn
+        ON_BATTLER_TURN_END = /^<tbs_on_bat_end>/i #data: bat
+        #when any battler gets a state
+        ON_BATTLER_ADD_STATE = /^<tbs_on_add_state>/i #data: bat, state
+        #when any battler gets state number x
+        ON_BATTLER_ADD_STATE_X = /^<tbs_on_astate (\d+)>/i #data: bat, state
+        #when any battler gets a state
+        ON_BATTLER_RM_STATE = /^<tbs_on_rm_state>/i #data: bat, state
+        #when any battler gets state number x
+        ON_BATTLER_RM_STATE_X = /^<tbs_on_rstate (\d+)>/i #data: bat, state
+      end #GLOBAL
 
-  #Don't edit anything past this point
-  EVENT_KEYS = [:follow,:getskill,:gts,:bts,:bte,:bas,:cok,:reach,:leave,:skill,:item,:end]
-  EVENT_COMMENTS_TRIGGERS = {
-    :follow   => EVENTS::FOLLOW_BATTLER,
-    :getskill => EVENTS::GIVE_SKILL, #param
-    :team     => EVENTS::TEAM, #param
-    :mtype    => EVENTS::MOVE_TYPE, #param
-    :gts      => TRIGGERS::GLOBAL::ON_GLOBAL_TURN_START,
-    :bts      => TRIGGERS::GLOBAL::ON_BATTLER_TURN_START,
-    :bte      => TRIGGERS::GLOBAL::ON_BATTLER_TURN_END,
-    :bas      => TRIGGERS::GLOBAL::ON_BATTLER_ADD_STATE,
-    :cok      => TRIGGERS::LOCAL::ON_CURSOR_OK,
-    :reach    => TRIGGERS::LOCAL::ON_BATTLER_REACH,
-    :leave    => TRIGGERS::LOCAL::ON_BATTLER_LEAVE,
-    :skill    => TRIGGERS::LOCAL::ON_SKILL, #param
-    :item     => TRIGGERS::LOCAL::ON_ITEM, #param
-    :end      => TRIGGERS::TRIGGER_END,
-  }
-  GLOBAL_TRIGGERS_KEYS = [:gts,:bts,:bte,:bas]
-  EVENT_NO_END = [:follow,:getskill,:team,:mtype]
-  EVENT_WITH_PARAM = [:skill,:item]
+      module LOCAL
+        #if the cursor in select/place mode clicks on this event,
+        #triggers before the battler selection if any
+        ON_CURSOR_OK = /^<tbs_on_cursor_ok>/i
+        #when any battler reaches this event
+        ON_BATTLER_REACH = /^<tbs_on_bat_reach>/i #data: bat
+        #when any battler leaves this event
+        ON_BATTLER_LEAVE = /^<tbs_on_bat_leave>/i #data: bat
+        #when skill x is cast upon this cell (among others)
+        ON_SKILL = /^<tbs_on_skill (\d+)>/i # sid
+        #when item x is cast upon this cell
+        ON_ITEM = /^<tbs_on_item (\d+)>/i # iid
+      end #LOCAL
+    end #EVENT_LABELS
+  end #REGEXP
+
+#==========================================================================
+# Don't edit things past here!
+#==========================================================================
+
+  #==========================================================================
+  # Trigger_Data -> stores a key (for hash tables), a regexp to find in labels
+  # a boolean whether the trigger is 'global', another whether the trigger needs
+  # more data to activate (like under specific skills ids or items)
+  #==========================================================================
+  All_Trigger_Data = []
+  class Trigger_Data
+    attr_accessor :key, :regexp, :label_name
+    def initialize(key, label_regexp, bglobal, bparam = false)
+      @key = key
+      @regexp = label_regexp
+      @bglobal = bglobal
+      @bparam = bparam
+      All_Trigger_Data.push(self)
+    end
+    def param?; @bparam; end
+    def global?; @bglobal; end
+  end #Trigger_Data
+
+  #global triggers
+  Trigger_Data.new(:gts, REGEXP::EVENT_LABELS::GLOBAL::ON_GLOBAL_TURN_START, true)
+  Trigger_Data.new(:bts, REGEXP::EVENT_LABELS::GLOBAL::ON_BATTLER_TURN_START, true)
+  Trigger_Data.new(:bte, REGEXP::EVENT_LABELS::GLOBAL::ON_BATTLER_TURN_END, true)
+  Trigger_Data.new(:bas, REGEXP::EVENT_LABELS::GLOBAL::ON_BATTLER_ADD_STATE, true)
+  #new additions
+  Trigger_Data.new(:bas2, REGEXP::EVENT_LABELS::GLOBAL::ON_BATTLER_ADD_STATE_X, true, true)
+  Trigger_Data.new(:brs, REGEXP::EVENT_LABELS::GLOBAL::ON_BATTLER_RM_STATE, true)
+  Trigger_Data.new(:brs2, REGEXP::EVENT_LABELS::GLOBAL::ON_BATTLER_RM_STATE_X, true, true)
+
+  #local triggers
+  Trigger_Data.new(:cok, REGEXP::EVENT_LABELS::LOCAL::ON_CURSOR_OK, false)
+  Trigger_Data.new(:reach, REGEXP::EVENT_LABELS::LOCAL::ON_BATTLER_REACH, false)
+  Trigger_Data.new(:leave, REGEXP::EVENT_LABELS::LOCAL::ON_BATTLER_LEAVE, false)
+  Trigger_Data.new(:skill, REGEXP::EVENT_LABELS::LOCAL::ON_SKILL, false, true)
+  Trigger_Data.new(:item, REGEXP::EVENT_LABELS::LOCAL::ON_ITEM, false, true)
 end #TBS
 
 #==========================================================================
@@ -277,6 +323,7 @@ class Game_Battler < Game_BattlerBase
     return TBS::SELF if event.battler == self
     return TBS::TEAMS.friend_status(@team, event.team)
   end
+
   #--------------------------------------------------------------------------
   # overwrite method: can_cross_ev? -> now reads the event move type
   #--------------------------------------------------------------------------
@@ -300,8 +347,22 @@ class Game_Battler < Game_BattlerBase
   #--------------------------------------------------------------------------
   alias tbs_te_add_new_state add_new_state
   def add_new_state(state_id)
-    $game_map.call_triggers(:bas,[self,state_id]) if SceneManager.scene_is?(Scene_TBS_Battle)
+    if SceneManager.scene_is?(Scene_TBS_Battle)
+      $game_map.call_triggers(:bas,[self,state_id])
+      $game_map.call_triggers_x(:bas2,state_id,[self,state_id])
+    end
     tbs_te_add_new_state(state_id)
+  end
+  #--------------------------------------------------------------------------
+  # alias method: add_new_state -> triggers the proper events
+  #--------------------------------------------------------------------------
+  alias tbs_te_remove_state remove_state
+  def remove_state(state_id)
+    if state?(state_id) && SceneManager.scene_is?(Scene_TBS_Battle)
+      $game_map.call_triggers(:brs,[self,state_id])
+      $game_map.call_triggers_x(:brs2,state_id,[self,state_id])
+    end
+    tbs_te_remove_state(state_id)
   end
   #--------------------------------------------------------------------------
   # alias method: on_battle_start -> links the event to the battler
@@ -318,10 +379,8 @@ end #Game_Battler
 #==========================================================================
 # BattleManager -> calls turn_start triggers
 #==========================================================================
-class << BattleManager
-  alias tbs_trigger_bm_turn_start turn_start
-end
 module BattleManager
+  class <<self; alias tbs_trigger_bm_turn_start turn_start; end
   def self.turn_start
     tbs_trigger_bm_turn_start
     $game_map.call_triggers(:gts)
@@ -348,7 +407,7 @@ class Scene_TBS_Battle < Scene_Base
     bat = BattleManager.actor
     skill_id = @actor_command_window.current_ext
     bat.input.set_skill(skill_id)
-    l = bat.gen_targets(bat.getRange(skill_id,:skill))
+    l = bat.gen_targets(bat.get_range(skill_id,:skill))
     type2 = $data_skills[skill_id].for_friend? ? :help_skill : :skill
     @spriteset.draw_range(l,TBS.sprite_type(type2))
     @cursor.set_skill_data(bat, l)
@@ -420,22 +479,34 @@ class Game_Map
   #--------------------------------------------------------------------------
   def init_global_triggers
     @global_triggers = {}
-    for key in TBS::GLOBAL_TRIGGERS_KEYS
-      @global_triggers[key] = {}
+    TBS::All_Trigger_Data.each do |td|
+      @global_triggers[td.key] = {} if td.global?
     end
   end
   #--------------------------------------------------------------------------
   # new method: call_tbs_event
   #--------------------------------------------------------------------------
   def call_tbs_event(list,event_id=0, params = [])
+    return unless list #if some local triggers were removed
     @waiting_events.push([list,event_id,params])
   end
   #--------------------------------------------------------------------------
-  # new method: call_trigger
+  # new method: call_triggers
   #--------------------------------------------------------------------------
   def call_triggers(trigger_key,params = [])
+    return unless @global_triggers[trigger_key] #if some triggers were removed
     @global_triggers[trigger_key].each_pair do |key, value|
-      call_tbs_event(value, key, params) #key is event id, value is a list
+      call_tbs_event(value, key, params) #key is event id, value is a list of event commands
+    end
+  end
+  #--------------------------------------------------------------------------
+  # new method: call_triggers_x -> when the trigger has a second key being a
+  # parameter like a state_id
+  #--------------------------------------------------------------------------
+  def call_triggers_x(trigger_key, id, params = [])
+    return unless @global_triggers[trigger_key][id] #if some triggers were removed
+    @global_triggers[trigger_key][id].each_pair do |key, value|
+      call_tbs_event(value, key, params) #key is event id, value is a list of event commands
     end
   end
 end #Game_Map
@@ -455,21 +526,32 @@ class TBS_PageData
   #--------------------------------------------------------------------------
   def initialize(event_id)
     @id = event_id
-    @move_type = TBS::EVENTS::DEFAULT_MOVE_TYPE
-    @team = TBS::EVENTS::DEFAULT_TEAM
+    @move_type = TBS::EVENT_TRIGGERS::DEFAULT_MOVE_TYPE
+    @team = TBS::EVENT_TRIGGERS::DEFAULT_TEAM
     @follow_bat = false
     @give_skill_list = []
     @triggers = {}
-    for k in TBS::EVENT_WITH_PARAM
-      @triggers[k] = {}
+    TBS::All_Trigger_Data.each do |td|
+      @triggers[td.key] = {} if td.param?
     end
   end
   #--------------------------------------------------------------------------
   # set_global_trigger
   #--------------------------------------------------------------------------
   def set_global_trigger
-    for k in TBS::GLOBAL_TRIGGERS_KEYS
-      $game_map.global_triggers[k][@id] = @triggers[k] if @triggers[k]
+    TBS::All_Trigger_Data.each do |td|
+      next unless td.global? && @triggers[td.key]
+      k = td.key
+      if td.param?
+        #for global triggers with parameters, the data will store
+        #trigger_key -> parameter -> event_id
+        @triggers[k].each_pair do |id,list|
+          $game_map.global_triggers[k][id] ||= {}
+          $game_map.global_triggers[k][id][@id] = list
+        end
+      else
+        $game_map.global_triggers[k][@id] = @triggers[k]
+      end
     end
   end
 end #TBS_PageData
@@ -505,7 +587,7 @@ class Game_Character_TBS < Game_Character
   #--------------------------------------------------------------------------
   def on_leave(prev_pos)
     evList = $game_map.battle_events_at(prev_pos[0],prev_pos[1]).select{|ev| ev.triggers[:leave]}
-    evList.select!{|ev| ev.battler != @battler} unless TBS::EVENTS::FOLLOW_TRIGGERS_REACH_LEAVE_SELF
+    evList.select!{|ev| ev.battler != @battler} unless TBS::EVENT_TRIGGERS::FOLLOW_TRIGGERS_REACH_LEAVE_SELF
     evList.each{|ev| $game_map.call_tbs_event(ev.triggers[:leave],ev.id)}
     SceneManager.scene.process_event if SceneManager.scene_is?(Scene_TBS_Battle)
   end
@@ -515,7 +597,7 @@ class Game_Character_TBS < Game_Character
   #--------------------------------------------------------------------------
   def on_reach
     evList = $game_map.battle_events_at(@x,@y).select{|ev| ev.triggers[:reach]}
-    evList.select!{|ev| ev.battler != @battler} unless TBS::EVENTS::FOLLOW_TRIGGERS_REACH_LEAVE_SELF
+    evList.select!{|ev| ev.battler != @battler} unless TBS::EVENT_TRIGGERS::FOLLOW_TRIGGERS_REACH_LEAVE_SELF
     evList.each{|ev| $game_map.call_tbs_event(ev.triggers[:reach],ev.id)}
     SceneManager.scene.process_event if SceneManager.scene_is?(Scene_TBS_Battle)
   end
@@ -565,6 +647,7 @@ class Game_Event < Game_Character
   # new method: link_to_bat
   #--------------------------------------------------------------------------
   def link_to_bat(bat)
+    puts sprintf("linked %d to %s", self.id, bat.name)
     @battler = bat
   end
   #--------------------------------------------------------------------------
@@ -576,53 +659,57 @@ class Game_Event < Game_Character
     read_triggers #if SceneManager.scene_is?(Scene_TBS_Battle)
   end
   #--------------------------------------------------------------------------
-  # new method: read_triggers -> takes every command between the comments,
-  # remove them from the event page and store them in another object until the right moment
+  # new method: read_tbs_trigger_comments (tbs_pagedata is a TBS_PageData obj)
+  #--------------------------------------------------------------------------
+  def read_tbs_trigger_comments(tbs_pagedata)
+    note.split(/[\r\n]+/).each { |line|
+    case line
+    when TBS::REGEXP::EVENT_COMMENTS::FOLLOW_BATTLER
+      tbs_pagedata.follow_bat = true
+    when TBS::REGEXP::EVENT_COMMENTS::GIVE_SKILL
+      tbs_pagedata.give_skill_list.push($1.to_i)
+    when TBS::REGEXP::EVENT_COMMENTS::TEAM
+      tbs_pagedata.team =  $1.to_i
+    when TBS::REGEXP::EVENT_COMMENTS::MOVE_TYPE
+      tbs_pagedata.move_type =  eval($1)
+    end
+    } # event.note.split
+    tbs_pagedata
+  end
+  #--------------------------------------------------------------------------
+  # new method: read_tbs_trigger_labels (tbs_pagedata is a TBS_PageData obj)
+  # will store in each reaction key the list of commands to execute, here the
+  # list is the original event commands + at the begining a jump to the
+  # triggered label
+  #--------------------------------------------------------------------------
+  def read_tbs_trigger_labels(tbs_pagedata)
+    return tbs_pagedata unless @list
+    @list.select{|cmd| cmd.code == 118}.each do |cmd|
+      TBS::All_Trigger_Data.each do |td|
+        cmd.parameters[0].scan(td.regexp) do |m|
+          cmdl = [RPG::EventCommand.new(119,0,cmd.parameters.dup)] + @list
+          td.param? ? tbs_pagedata.triggers[td.key][$1.to_i] = cmdl : tbs_pagedata.triggers[td.key] = cmdl
+        end
+      end
+    end
+    tbs_pagedata
+  end
+  #--------------------------------------------------------------------------
+  # new method: read_triggers -> reads the labels and comments of the current
+  # page and determines the current event properties as well as its triggers
   #--------------------------------------------------------------------------
   def read_triggers
     @triggers = {} unless @triggers
-    unless @triggers.has_key?(@list)
-      tbs_trigger = TBS_PageData.new(@id)
-      nread_page = true
-      start = 0
-      while nread_page && @list
-        a,b,k,value = nil,nil,nil,nil
-        for i in start...@list.size
-          nread_page = false if i >= @list.size-1
-          command = @list[i]
-          next unless command.code == 108
-          res = command.parameters[0].split #cmd x
-          key = TBS::EVENT_COMMENTS_TRIGGERS.key(res[0])
-          next unless key
-          tbs_trigger.follow_bat = true if key == :follow
-          tbs_trigger.give_skill_list.push(res[1].to_i) if key == :getskill && res[1]
-          tbs_trigger.team = res[1].to_i if key == :team && res[1]
-          tbs_trigger.move_type = eval(res[1]) if key == :mtype && res[1]
-          #eval("tbs_trigger.move_type =" + res[1]) if (key == :mtype and res[1])
-          next if TBS::EVENT_NO_END.include?(key)
-          if key == :end && k
-            b = i
-          elsif key != :end
-            k = key
-            value = res[1].to_i if TBS::EVENT_WITH_PARAM.include?(key)
-            start = a = i
-          else
-            puts sprintf("Badly written event %d on map %d", @id, $game_map.map_id)
-          end
-          break if a && b
-        end #for
-        if TBS::EVENT_WITH_PARAM.include?(k)
-          tbs_trigger.triggers[k][value] = a && b && @list.slice!(a, b-a+1).push(@list[-1])
-        elsif k
-          tbs_trigger.triggers[k] = a && b && @list.slice!(a, b-a+1).push(@list[-1])
-        end
-      end #while
-      @triggers[@list] = tbs_trigger
+    unless @triggers.has_key?(@list) #skip if already read this page
+      tbs_pagedata = TBS_PageData.new(@id)
+      tbs_pagedata = read_tbs_trigger_comments(tbs_pagedata)
+      tbs_pagedata = read_tbs_trigger_labels(tbs_pagedata)
+      @triggers[@list] = tbs_pagedata
     end
-    tbs_trigger = @triggers[@list]
-    @tbs_move_type = tbs_trigger.move_type
-    @team = tbs_trigger.team
-    tbs_trigger.set_global_trigger
+    tbs_pagedata = @triggers[@list]
+    @tbs_move_type = tbs_pagedata.move_type
+    @team = tbs_pagedata.team
+    tbs_pagedata.set_global_trigger
   end
 end #Game_Event
 

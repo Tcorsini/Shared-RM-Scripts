@@ -2,7 +2,7 @@
 # TBS Option Menu
 #------------------------------------------------------------------------------
 # Author: Timtrack
-# date: 10/04/2025
+# date: 19/10/2025
 # Requires: [TBS] by Timtrack
 # Special thanks to Yanfly for Yanfly's System Options this script takes
 # inspiration from
@@ -10,8 +10,14 @@
 
 $imported = {} if $imported.nil?
 $imported["TIM-TBS-Settings"] = true #set to false if you wish to disable the modifications
-raise "TBS Settings requires TBS by Timtrack" unless $imported["TIM-TBS"] if $imported["TIM-TBS-Settings"]
+if $imported["TIM-TBS-Settings"]
 
+#==============================================================================
+# Updates
+#------------------------------------------------------------------------------
+# 10/04/2025: first version
+# 19/10/2025: changed control with left/right buttons, automatically hides the
+# range color options when a range file is used
 #==============================================================================
 # Description
 #------------------------------------------------------------------------------
@@ -30,7 +36,7 @@ raise "TBS Settings requires TBS by Timtrack" unless $imported["TIM-TBS"] if $im
 #
 # (the values modified are already defined in [TBS] Core)
 #
-# Like Yanfly's settings menu, you may add custom variables and swicthes by
+# Like Yanfly's settings menu, you may add custom variables and switches by
 # modifying CUSTOM_SWITCHES and CUSTOM_VARIABLES
 #
 # The settings menu can be accessed from the global command windows from place
@@ -44,15 +50,14 @@ raise "TBS Settings requires TBS by Timtrack" unless $imported["TIM-TBS"] if $im
 # 4 - create an attribute in $game_system called @my_setting (must be the same name!)
 # You are done! For more specific settings, either use variables/switches or explore the code
 #==============================================================================
-# Installation: put it below TBS core and HST if used
+# Installation: put it below TBS core
 #==============================================================================
 # Terms of use: same as TBS project
 #==============================================================================
 
-if $imported["TIM-TBS-Settings"]
-
 module TBS
   module Options
+
     #The commands, in their order, comment or change the order to fit your own view
     COMMANDS = [
       :help_window,
@@ -79,6 +84,7 @@ module TBS
       :anim_range,
       :blank, #a white space
       #:variable_1, #to add a variable for instance
+      #swicth_1, #to add a game switch
       :save, #saves the settings
       :reset, #reset the settings to their default values (except variables and switches)
       :discard, #discard unsaved changes
@@ -417,6 +423,7 @@ class Window_TBS_Options < Window_Command
     @help_descriptions = {}
     return unless @my_data
     for command in TBS::Options::COMMANDS
+      next if auto_ignore_command?(command)
       if TBS::Options::COMMAND_VOCAB.include?(command)
         add_command(TBS::Options::COMMAND_VOCAB[command][0], command)
         @help_descriptions[command] = TBS::Options::COMMAND_VOCAB[command][2]
@@ -425,6 +432,18 @@ class Window_TBS_Options < Window_Command
         process_custom_variable(command)
       end
     end
+  end
+
+  #--------------------------------------------------------------------------
+  # auto_ignore_command? -> automatically remove the symbol from the command
+  # list if system knows it's useless, like colors commands when a sprite
+  # is available
+  #--------------------------------------------------------------------------
+  def auto_ignore_command?(symb)
+    return false unless color_cmd?(symb)
+    type = TBS::Options::COLOR_COMMANDS.index(symb)
+    filename = TBS.range_picture(type)
+    return filename && !filename.empty?
   end
 
   #--------------------------------------------------------------------------

@@ -8,7 +8,6 @@
 
 $imported = {} if $imported.nil?
 $imported["TIM-TBS-Height"] = true #set to false if you wish to disable the modifications
-raise "TBS Height requires TBS by Timtrack" unless $imported["TIM-TBS"] if $imported["TIM-TBS-Height"]
 
 #==============================================================================
 # Updates
@@ -237,23 +236,32 @@ if $imported["TIM-TBS-Height"]
     def simple_height_target(bat,source,target)
       posList,dirs = TBS.crossed_positions_dir(source,target)
       max_h = height_property(source,bat)[2] #my height
-      tgt_prop = height_property(target,occupied_by?(target.x,target.y))
+      tgt_prop = height_property(target,battler_at(*target))
 
       obstacle_h = 0 #max height of obstacles met
-      for i in 0...posList.size-1
-        p = posList[i]
+      posList.each do |p|
         if TBS::BATTLER_HIDE #this feature is still used
-          bat2 = occupied_by?(p.x,p.y)
-          if (bat2 && bat2.hide_view?(bat))
-            prop = height_property(p,bat2)
+          batlist = battlers_at(*p).select{|b| b.hide_view?(bat)}
+          batlist.each do |b|
+            prop = height_property(p,b)
             delta = prop[2] - max_h #is the unit above my height?
             if delta > obstacle_h && (prop[1] - max_h <= obstacle_h)
               obstacle_h = delta
               return false if prop[2] >= tgt_prop[2]
             end
-            next #this is enough
           end
-        end
+          next unless batlist.empty?
+          #bat2 = battler_at(p.x,p.y)
+          #if (bat2 && bat2.hide_view?(bat))
+          #  prop = height_property(p,bat2)
+          #  delta = prop[2] - max_h #is the unit above my height?
+          #  if delta > obstacle_h && (prop[1] - max_h <= obstacle_h)
+          #    obstacle_h = delta
+          #    return false if prop[2] >= tgt_prop[2]
+          #  end
+          #  next #this is enough
+          #end
+        end #TBS::BATTLER_HIDE
         #case when no bat2 is met:
         h = tbs_height(p)
         delta = h - max_h
@@ -261,7 +269,7 @@ if $imported["TIM-TBS-Height"]
           obstacle_h = delta
           return false if h >= tgt_prop[2]
         end
-      end
+      end #posList.each
       return true
     end
 
@@ -275,7 +283,7 @@ if $imported["TIM-TBS-Height"]
       #return true #code not yet working!
       posList, dirs, aList = TBS.crossed_positions_axis(source,target)
       cast_h = height_property(source,bat)[2]
-      b2 = occupied_by?(target.x,target.y)
+      b2 = battler_at(target.x,target.y)
       tgt_prop = height_property(target,b2)
 
       a = TBS.get_a(cast_h,tgt_prop[1],aList[-2])
@@ -288,7 +296,7 @@ if $imported["TIM-TBS-Height"]
       until seg_list.empty? || i >= posList.size-1
         p = posList[i]
         if TBS::BATTLER_HIDE #this feature is still used
-          bat2 = occupied_by?(p.x,p.y)
+          bat2 = battler_at(p.x,p.y)
           if (bat2 && bat2.hide_view?(bat))
             prop = height_property(p,bat2)
             a = TBS.get_a(cast_h,prop[1],aList[i])
@@ -347,7 +355,7 @@ if $imported["TIM-TBS-Height"]
       lx = dx < 0 ? -1 : 1
       ly = dy < 0 ? -1 : 1
       #diagonal case
-      if dx.abs() == dy.abs()
+      if dx.abs == dy.abs
         d = TBS.delta_to_direction(lx,ly)
         #added:
         sqr2 = Math.sqrt(2)
@@ -371,7 +379,7 @@ if $imported["TIM-TBS-Height"]
         a = 100000000 #a big enough integer such that y never changes
         b = 0 #the value does not matter
       else
-        a = dy.to_f()/dx.to_f()
+        a = dy.to_f/dx.to_f
         b = sy - a*sx
       end
       xrange = crossed_range(sx,tx)
@@ -388,7 +396,7 @@ if $imported["TIM-TBS-Height"]
             y2 = yrange[iy]
             x2 = (y2 - b)/a
             #checks if x2 is closer to x than x1
-            if (sx-x1).abs() > (sx-x2).abs()
+            if (sx-x1).abs > (sx-x2).abs
               x1, y1 = x2, y2
               iy += 1
               d = TBS.delta_to_direction(0,ly)
@@ -411,8 +419,8 @@ if $imported["TIM-TBS-Height"]
         end
 
         abscisse = (source - POS.new(x1,y1)).euclidian_norm #added
-        x1 = x1.round()
-        y1 = y1.round()
+        x1 = x1.round
+        y1 = y1.round
         if x != x1 || y != y1
           pos = POS.new(x1,y1) #only an integer matters
           x,y = x1,y1
@@ -570,5 +578,5 @@ if $imported["TIM-TBS-Height"]
       s += "}"
       return s
     end
-  end
+  end #Interval
 end #$imported["TIM-TBS-Height"]

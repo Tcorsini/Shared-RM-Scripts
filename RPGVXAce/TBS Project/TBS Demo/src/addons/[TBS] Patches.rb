@@ -7,7 +7,6 @@
 #==============================================================================
 
 $imported = {} if $imported.nil?
-raise "TBS PatchHub requires TBS by Timtrack" unless $imported["TIM-TBS"]
 $imported["TIM-TBS-PatchHub"] = true
 
 #==============================================================================
@@ -20,6 +19,7 @@ $imported["TIM-TBS-PatchHub"] = true
 # 09/04/2025: YEA System options linked to v0.7 addon option menu
 # 18/04/2025: added patch for dodger451's Threat System
 # 04/05/2025: patch with dodger451's Threat System and handle TBS-Save addon
+# 07/11/2025: v0.9 support
 #==============================================================================
 # �� Description
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -31,6 +31,7 @@ $imported["TIM-TBS-PatchHub"] = true
 # List of supported scripts by TBS.
 # Without any patch:
 # - YEA - Ace Save Engine v1.03
+# - Hime Effect Manager
 # With this patch:
 # - YEA Core Engine v1.09
 # - YEA Battle Core v1.22
@@ -39,9 +40,19 @@ $imported["TIM-TBS-PatchHub"] = true
 # - YEA Victory Aftermath v1.04
 # - Zeus Lights & Shadows v1.3
 # - dodger451's Threat System v0.1
+# - Theo Insane Anti Lag v1.1
 # TODO: check if the patch works with:
-# - YEA Lunatic States v1.02
 # - YEA Skill Restrictions v1.02
+# - YEA Target Manager v1.03 (used for random retargeting, the rest is unsuported or redundant)
+#
+# Partial support:
+# - YEA Lunatic States v1.02:
+#   you must create a method in class Scene_TBS_Battle with the same code as
+#   lunatic_object_effect (first method from Lunatic States script) since the
+#   above method is to be modified by users, I cannot put it in the patch,
+#   method calls are already handled in this patch.
+#   Put Lunatic States and your patched method BELOW this patch
+#
 # Unsupported:
 # - YEA Instant Cast: TBS actions are already instants
 # - GTBS and other battle systems overhauls are not compatible
@@ -61,15 +72,16 @@ $imported["TIM-TBS-PatchHub"] = true
 # [RPG Maker Scripts]
 # Victor Core Engine (required for TBS)
 # Sprite_Tile (required for TBS)
+# Simple Notetag Config (required for TBS)
 # Yanfly Core Engine (optional)
 # Yanfly Battle Core (optional)
+# Hime Effect Manager (optional)
 # [TBS Core]
 # [TBS addons]
 # Supported scripts (in their relative order, all are optional)
 # This patch
 # Main
 #==============================================================================
-
 
 #==============================================================================
 # YEA - Ace Core Engine patch
@@ -345,6 +357,20 @@ if $imported["YEA-BattleEngine"]
     def can_rm_sprite?
       @popups.empty? && popup_abe_can_rm_sprite?
     end
+    #--------------------------------------------------------------------------
+    # alias method: dispose -> clear any remaining popup
+    #--------------------------------------------------------------------------
+    alias tbs_popups_sprite_tbschar_dispose dispose
+    def dispose
+      tbs_popups_sprite_tbschar_dispose
+      #TODO: BUG!
+      @popups.each do |s|
+        next if s.disposed?
+        s.bitmap.dispose
+        s.dispose
+      end
+      @popups.clear
+    end
   end # Sprite_Character_TBS
 
 
@@ -446,7 +472,6 @@ if $imported["YEA-BattleEngine"]
     # public instance variables
     #--------------------------------------------------------------------------
     attr_accessor :info_viewport
-    attr_accessor :spriteset
     attr_accessor :status_aid_window
     attr_accessor :subject
 
@@ -540,31 +565,26 @@ if $imported["YEA-BattleEngine"]
     # new method: end_battle_conditions?
     #--------------------------------------------------------------------------
     def end_battle_conditions?
-      return BattleManager.end_battle_cond?
+      return BattleManager.end_battle_status != false
     end
 
     #--------------------------------------------------------------------------
-    # overwrite method: execute_action
+    # alias method -> flash_before_acting?
     #--------------------------------------------------------------------------
-    def execute_action(tbs = false)
-      @subject.sprite_effect_type = :whiten if YEA::BATTLE::FLASH_WHITE_EFFECT
-      @subject.char.set_direction(TBS.dir_towards(@subject.pos,@subject.current_action.tgt_pos)) if tbs
-      use_item(tbs)
-      @log_window.wait_and_clear
+    alias scene_tbs_battle_flash_before_acting_abe flash_before_acting?
+    def flash_before_acting?
+      return false unless YEA::BATTLE::FLASH_WHITE_EFFECT
+      return scene_tbs_battle_flash_before_acting_abe
     end
 
     #--------------------------------------------------------------------------
-    # overwrite method: apply_item_effects
+    # alias method: apply_item_effects
     #--------------------------------------------------------------------------
+    alias tbs_apply_item_effects_abe apply_item_effects
     def apply_item_effects(target, item)
-      if $imported["YEA-LunaticObjects"]
-        lunatic_object_effect(:prepare, item, @subject, target)
-      end
-      target.item_apply(@subject, item)
-      @log_window.display_action_results(target, item)
-      if $imported["YEA-LunaticObjects"]
-        lunatic_object_effect(:during, item, @subject, target)
-      end
+      lunatic_object_effect(:prepare, item, @subject, target) if $imported["YEA-LunaticObjects"]
+      tbs_apply_item_effects_abe(target,item)
+      lunatic_object_effect(:during, item, @subject, target) if $imported["YEA-LunaticObjects"]
       perform_collapse_check(target)
     end
 
@@ -613,30 +633,10 @@ if $imported["YEA-BattleEngine"]
       end
     end
     #--------------------------------------------------------------------------
-    # overwrite method: use_item
+    # new method: lunatic_object_effect -> you must overwrite it if you use
+    # YEA-LunaticObjects
     #--------------------------------------------------------------------------
-    def use_item(tbs)
-      store_action_data(@subject,@subject.current_action)
-      item = @subject.current_action.item
-      @log_window.display_use_item(@subject, item)
-      @subject.use_item(item)
-
-      if $imported["YEA-LunaticObjects"]
-        lunatic_object_effect(:before, item, @subject, @subject)
-      end
-      process_casting_animation if $imported["YEA-CastAnimations"]
-      targets = tbs ? @subject.current_action.tbs_make_final_targets : @subject.current_action.make_targets.compact
-      @subject.current_action.call_additional_tbs_effects if tbs
-      (tbs ? show_tbs_animation(targets, item.animation_id, @subject.current_action) : show_animation(targets, item.animation_id)) if show_all_animation?(item)
-      targets.each {|target|
-        if $imported["YEA-TargetManager"]
-          target = alive_random_target(target, item) if item.for_random?
-        end
-        item.repeats.times { invoke_item(target, item) } }
-      if $imported["YEA-LunaticObjects"]
-        lunatic_object_effect(:after, item, @subject, @subject)
-      end
-    end
+    def lunatic_object_effect(type, item, user, target); end
 
     #--------------------------------------------------------------------------
     # alias method: invoke_item
@@ -644,15 +644,26 @@ if $imported["YEA-BattleEngine"]
     alias scene_tbs_battle_invoke_item_abe invoke_item
     def invoke_item(target, item)
       show_animation([target], item.animation_id) if separate_ani?(target, item)
-      if target.dead? != item.for_dead_friend?
-        @subject.last_target_index = target.index
-        return
-      end
+      return @subject.last_target_index = target.index if target.dead? != item.for_dead_friend?
       scene_tbs_battle_invoke_item_abe(target, item)
     end
 
+    if $imported["YEA-TargetManager"]
+      #--------------------------------------------------------------------------
+      # new method: random_retargeting (to be used with YEA-TargetManager) to
+      # redirect randomness to valid units
+      #--------------------------------------------------------------------------
+      def random_retargeting(item,original_target,targets)
+        return original_target if original_target.dead? == item.for_dead_friend?
+        return original_target unless YEA::TARGET::RANDOM_REDIRECT
+        tgt_list = targets.select{|t| t.dead? == item.for_dead_friend?}
+        return original_target if tgt_list.empty?
+        return Game_Action.random_target(tgt_list)
+      end
+    end #$imported["YEA-TargetManager"]
+
     #--------------------------------------------------------------------------
-    # new method: show_all_animation?
+    # overwrite method: show_all_animation?
     #--------------------------------------------------------------------------
     def show_all_animation?(item)
       return true if item.one_animation
@@ -678,11 +689,8 @@ if $imported["YEA-BattleEngine"]
     def turn_end
       update_party_cooldowns if $imported["YEA-CommandParty"]
       turn_end_tbs_patch_ybc
-      #BattleManager.turn_end
-      #process_event
-      #turn_start
       return if end_battle_conditions?
-  end
+    end
 
     #--------------------------------------------------------------------------
     # new method: hide_extra_gauges
@@ -698,7 +706,38 @@ if $imported["YEA-BattleEngine"]
       # Made for compatibility
     end
 
-  end # Scene_Battle
+  end # Scene_TBS_Battle
+
+if $imported["TIM-TBS-Positionning"]
+class Game_Battler
+  #--------------------------------------------------------------------------
+  # alias method: apply_push_damage
+  #--------------------------------------------------------------------------
+  alias ybe_apply_push_damage apply_push_damage
+  def apply_push_damage(value)
+    ybe_apply_push_damage(value)
+    create_push_popup(value)
+  end
+  #--------------------------------------------------------------------------
+  # new method: create_push_popup
+  #--------------------------------------------------------------------------
+  def create_push_popup(dmg)
+    return unless dmg > 0
+    setting = :hp_dmg
+    rules = "HP_DMG"
+    text = sprintf(YEA::BATTLE::POPUP_SETTINGS[setting], dmg.group)
+    create_popup(text, rules)
+  end
+  #--------------------------------------------------------------------------
+  # alias method: make_damage_popups
+  #--------------------------------------------------------------------------
+  alias tbs_patch_pos_make_damage_popups make_damage_popups
+  def make_damage_popups(user)
+    #flags.push("backstab") if @result.backstab
+    tbs_patch_pos_make_damage_popups(user)
+  end
+end #Game_Battler
+end #$imported["TIM-TBS-Positionning"]
 
 end #YEA-BattleEngine
 
@@ -708,6 +747,14 @@ end #YEA-BattleEngine
 # Links the result menu to Scene_TBS_Battle
 #==============================================================================
 if $imported["YEA-VictoryAftermath"]
+  class Window_VictoryEXP_Back < Window_Selectable
+    #--------------------------------------------------------------------------
+    # alias method: col_max -> avoids empty party crash issue
+    #--------------------------------------------------------------------------
+    alias tbs_wexp_back_col_max col_max
+    def col_max; [tbs_wexp_back_col_max,1].max; end
+  end #Window_VictoryEXP_Back
+
   class Game_Actor < Game_Battler
     #--------------------------------------------------------------------------
     # overwrite method: gain_exp
@@ -716,7 +763,7 @@ if $imported["YEA-VictoryAftermath"]
       enabled = !(SceneManager.scene_is?(Scene_TBS_Battle) || SceneManager.scene_is?(Scene_Battle))
       change_exp(self.exp + (exp * final_exp_rate).to_i, enabled)
     end
-  end
+  end #Game_Actor
 
   class Scene_TBS_Battle < Scene_Base
     #--------------------------------------------------------------------------
@@ -1225,32 +1272,30 @@ if $imported["dodger451-ThreatSystem"]
     #--------------------------------------------------------------------------
     # alias method: start
     #--------------------------------------------------------------------------
-    alias scene_tbs_battlestart_ga start
+    alias threat_scene_tbsbattle_start start
     def start
       $game_threat = Game_Threat.new()
       $game_threat.init_threat_tables
-      scene_tbs_battlestart_ga
+      threat_scene_tbsbattle_start
     end
 
-    if $imported["TIM-TBS-Save"]
-      #--------------------------------------------------------------------------
-      # alias method: save_battle_state
-      #--------------------------------------------------------------------------
-      alias threat_save_battle_state save_battle_state
-      def save_battle_state
-        threat_save_battle_state
-        $game_temp.tbs_scene_data[:threat] = $threat_tables
-      end
+    #--------------------------------------------------------------------------
+    # alias method: save_battle_state
+    #--------------------------------------------------------------------------
+    alias threat_save_battle_state save_battle_state
+    def save_battle_state
+      threat_save_battle_state
+      $game_temp.tbs_scene_data[:threat] = $threat_tables
+    end
 
-      #--------------------------------------------------------------------------
-      # alias method: retrieve_battle_state
-      #--------------------------------------------------------------------------
-      alias threat_retrieve_battle_state retrieve_battle_state
-      def retrieve_battle_state
-        $threat_tables = $game_temp.tbs_scene_data[:threat] if $game_temp.save_was_in_tbs?
-        threat_retrieve_battle_state
-      end
-    end #$imported["TIM-TBS-Save"]
+    #--------------------------------------------------------------------------
+    # alias method: retrieve_battle_state
+    #--------------------------------------------------------------------------
+    alias threat_retrieve_battle_state retrieve_battle_state
+    def retrieve_battle_state
+      $threat_tables = $game_temp.tbs_scene_data[:threat] if $game_temp.save_was_in_tbs?
+      threat_retrieve_battle_state
+    end
   end # Scene_TBS_Battle
 
   #==========================================================================
@@ -1261,9 +1306,9 @@ if $imported["dodger451-ThreatSystem"]
     #--------------------------------------------------------------------------
     # alias method: update_threat_on_execute_damage
     #--------------------------------------------------------------------------
-    alias tbs_update_threat_on_execute_damage update_threat_on_execute_damage
+    alias tbs_patch_update_threat_on_execute_damage update_threat_on_execute_damage
     def update_threat_on_execute_damage(user)
-      return tbs_update_threat_on_execute_damage(user) unless SceneManager.scene_is?(Scene_TBS_Battle)
+      return tbs_patch_update_threat_on_execute_damage(user) unless SceneManager.scene_is?(Scene_TBS_Battle)
       case true_friend_status(user)
       when TBS::ENEMY
         $game_threat.update_threat_on_damage(@result, user, self) if @result.hp_damage > 0
@@ -1356,3 +1401,58 @@ if $imported["dodger451-ThreatSystem"]
     end
   end #Game_Threat
 end #dodger451-ThreatSystem
+
+#==============================================================================
+# Theo - Insane Anti Lag
+#==============================================================================
+# Does not optimize anything but ensures no bugs is brought when using
+# Theo - Insane Anti Lag by TheoAllen
+#==============================================================================
+if $imported[:Theo_AntiLag]
+#============================================================================
+# Game_Map
+#============================================================================
+class Game_Map
+  #-------------------------------------------------------------------------
+  # alias method: setup_old_events -> replace the events under theo allen's script conditions
+  #-------------------------------------------------------------------------
+  alias tbs_theo_antilag_setup_old_events setup_old_events
+  def setup_old_events
+    @table = @old_table.dup
+    @forced_update_events = @old_forced_update_events.dup
+    @keep_update_events = @old_keep_update_events.dup
+    @starting_events = @old_starting_events.dup
+    @refreshed_events = @old_refreshed_events.dup
+    @old_table = @old_forced_update_events = @old_keep_update_events = @old_starting_events = @old_refreshed_events = nil
+    tbs_theo_antilag_setup_old_events
+  end
+
+  #-------------------------------------------------------------------------
+  # alias method: save_map_data -> store theo allen events objects
+  #-------------------------------------------------------------------------
+  alias tbs_theo_antilag_save_map_data save_map_data
+  def save_map_data
+    @old_table = @table.dup
+    @old_forced_update_events = @forced_update_events.dup
+    @old_keep_update_events = @keep_update_events.dup
+    @old_starting_events = @starting_events.dup
+    @old_refreshed_events = @refreshed_events.dup
+    tbs_theo_antilag_save_map_data
+  end
+end #Game_Map
+
+#==============================================================================
+# Spriteset_TBS_Map
+#==============================================================================
+class Spriteset_TBS_Map < Spriteset_Map
+  #-----------------------------------------------------------------------------
+  # alias method: create_characters -> copy theo's change to have it works on tbs characters
+  #-----------------------------------------------------------------------------
+  alias tbs_theo_antilag_create_characters create_characters
+  def create_characters
+    $game_map.event_redirect = Theo::AntiLag::Dispose_Sprite
+    tbs_theo_antilag_create_characters
+    $game_map.event_redirect = false
+  end
+end #Spriteset_TBS_Map
+end #$imported[:Theo_AntiLag]

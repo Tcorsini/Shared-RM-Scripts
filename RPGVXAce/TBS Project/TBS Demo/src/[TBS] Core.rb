@@ -1,11 +1,10 @@
 #==============================================================================
-#
-# TBS v0.8.1 by Timtrack
-# -- Last Updated: 10/05/2025
+# TBS v0.9 by Timtrack
+# -- Last Updated: 07/11/2025
 # -- Requires:
 #       -Victor Core Engine v 1.35
 #       -Timtrack's Sprite_Tile v 1.1
-#
+#       -Timtrack's Simple Notetag Config v 1
 #==============================================================================
 
 $imported = {} if $imported.nil?
@@ -16,18 +15,25 @@ $imported["TIM-TBS"] = true
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # Credit and Thanks
 # - Timtrack (author)
+#
 # Special thanks
 # - GubiD for GTBS this script takes inspiration from
-# - Clarabel for the notetag system from GTBS
-# Free to use in free or commercial games, you must give credit.
+# - Kyonides for saving the map before the battle
+# - Another Fen for saving the battle data and interpreter to save and change
+#   scene
+# - gstv87 for bug reports, advice and script sharing
+#
+# Free to use in free or commercial games, you must give credit to me and I
+# strongly sugggest you give credit to GubiD as well.
 #==============================================================================
 # Description
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # A set of scripts that introduces a Tactical Battle System taking inspiration
 # from BG3, Dofus, Wildermyth and Fire Emblem.
 # [TBS] Core is a single file that might be splitted into subones, it requires
-# both Victor Core Engine and Sprite_Tile. It Comes along with many optional
-# files to add features but they are not required for the battles to run properly.
+# Victor Core Engine, Sprite_Tile and Simple Notetag Config. It comes along with
+# many optional files to add features but they are not required for the battles
+# to run properly.
 #
 # This set of scripts is standalone, it is not compatible with GTBS and is
 # unlikely to work with any other overhaul of the battle system.
@@ -66,9 +72,29 @@ $imported["TIM-TBS"] = true
 #                    Forced tbs actions are now properly forced, regardless of the tgt_property conditions
 #                    Fixed ai pathfinding to consider other paths when blocked by other units
 #                    Battlers removed on death will now still display an animation and sound
-#                    (their circle and team number will be cleaned after all effects though)
+#                    (their circle and turn number will be cleaned after all effects though)
 # 10/05/2025: v0.8.1 Fix crash when ais had no available cells to move to
 #                    Fix tgt_empty? to check blocking events too
+# 11/05/2025: v0.8.2 Changed the datareading structure, tbs_attributes are now stored
+#                    in RPG:: objects after reading the notetags instead of hash tables
+#                    Ai calculations are shaped a bit differently, this might increase performances a bit
+# 07/11/2025: v0.9   Added animated poses system
+#                    Improved performances (less checks per frames)
+#                    Enemies sprites are now color-dependant of the sprite battler
+#                     in the database (see hue)
+#                    Added option to display the enemy sprite as a face in tbs
+#                     menus when no face is specified
+#                    Save system fixed and enter/exit tbs battle are cleaner
+#                     (you can freely use SceneManager.call or goto, just avoid
+#                     Scene_Map if the battle is not over)
+#                    Datareading structure is now its own script called
+#                     Simple Notetag Config, becoming a requirement for TBS
+#                    Abilities can now add or remove temporary move points to their targets
+#                    Added cursor sliding features
+#                    Cursor now follows the ai battlers when they act
+#                    Event triggers now using labels
+#                    Added push/pull addon
+#                    Code cleaning and bug fixes
 #==============================================================================
 # Features
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -130,7 +156,9 @@ $imported["TIM-TBS"] = true
 #   Requires
 #     -Victor Core Engine (deals with NoteTags reading and skills for battlers)
 #     -Sprite_Tile (deals with autotile ranges mostly)
+#     -Simple Notetag Config (handles shorter notetag reading)
 #
+#  (not up to date list of modifications)
 #   Modified classes:
 #   class RPG::Troop
 #     new attributes (private): extra_troops, notes
@@ -175,8 +203,8 @@ $imported["TIM-TBS"] = true
 #                  calc_pos_move(move_distance = available_mov, forbidden_list = []),
 #                  reverse_calc_pos_move(target_pos = pos, move_distance = available_mov, forbidden_list = []),
 #                  astar_heuristic(cost,p,tgt,min_cost), astar(tgt,move_distance = available_mov, forbidden_list = []),
-#                  true_friend_status(other), friend_status(other), getRange(id,type), getRangeWeapon, genTgt(spellRg),
-#                  genArea(tgt,spellRg), always_hide_view?, hide_view?(other), remove_on_death?,
+#                  true_friend_status(other), friend_status(other), get_range(id,type), get_range_weapon, gen_targets(spellRg),
+#                  gen_area(tgt,spellRg), always_hide_view?, hide_view?(other), remove_on_death?,
 #                  screen_x, screen_y, screen_z, init_ai, player_controllable?, skill_rating(skill_id),
 #                  attack_range?(id,type), has_played?, can_cross?, can_cross_ev?(moveRule,dir,event)
 #                  tbs_leave, force_tbs_action(skill_id, tgt, check_range = false),
@@ -185,12 +213,12 @@ $imported["TIM-TBS"] = true
 #                  get_ai_tactic, skill_cost_eval(formula,s,t), get_state_balloon
 #   class Game_Actor < Game_Battler
 #     alias methods: initialize, set_graphic, make_actions
-#     override methods: move_rule_id, mmov, getRangeWeapon, screen_x, screen_y, screen_z, can_battle?, get_ai_tactic
+#     override methods: move_rule_id, mmov, get_range_weapon, screen_x, screen_y, screen_z, can_battle?, get_ai_tactic
 #     new method: ai_usable_skills
 #   class Game_Enemy < Game_Battler
 #     new attributes: class_name, last_skill
 #     alias methods: initialize, transform, sprite (if YEA-BattleEngine), make_actions
-#     override methods: move_rule_id, mmov, always_hide_view?, getRangeWeapon, remove_on_death?, skill_rating(skill_id), get_ai_tactic
+#     override methods: move_rule_id, mmov, always_hide_view?, get_range_weapon, remove_on_death?, skill_rating(skill_id), get_ai_tactic
 #     overwrite methods: screen_x, screen_y, screen_z
 #     new methods: load_tbs_enemy_data(enemy_id), clear_actions, input, next_command, prior_command
 #                  ai_usable_skills, usable_skills, description
@@ -264,13 +292,13 @@ $imported["TIM-TBS"] = true
 #      meant as a replacement of Scene_Battle, any modification to the latter does not impact the former
 #   class Sprite_Character_TBS < Sprite_Character
 #      replaces Sprite_Battler for TBS
-#   class Sprite_Team < Sprite_Base
+#   class Sprite_Team < Sprite
 #     displays a sprite under the battler's sprite to show its team alliegeance.
-#   class Sprite_Active < Sprite_Base
+#   class Sprite_Active < Sprite
 #     displays an icon over the battler's sprite to show if the battler can be played
-#   class Sprite_Turn_Number < Sprite_Base
+#   class Sprite_Turn_Number < Sprite
 #     displays a number representing the position in the turnwheel of the battler
-#   class Sprite_DamagePreview < Sprite_Base
+#   class Sprite_DamagePreview < Sprite
 #     displays a text above the affected battlers representing how much damage they might take
 #   class Sprite_Range < Sprite_Tile
 #      displays all ranges/areas during battle
@@ -308,6 +336,7 @@ $imported["TIM-TBS"] = true
 # [RPG Maker Scripts]
 # Victor Core Engine
 # Sprite_Tile
+# Simple Notetag Config
 # [TBS] Core
 # [TBS addons] (optional)
 # Main
@@ -315,7 +344,6 @@ $imported["TIM-TBS"] = true
 # �� Known Issues/Missing content
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # Known issues:
-# -branching after saved battle is loaded is not working properly
 # -test the advanced height calculation [see addon TBS Height]
 # -vanilla ranges obstacles are not great when using flying units (or units at some obstacles)
 # -there were in previous tests random crashes/freezes of the game, I did fix them (at least partially)
@@ -327,8 +355,6 @@ $imported["TIM-TBS"] = true
 # -basic animation addon is considered
 #
 # Planned addons:
-# -push/pull effects [addon]
-# -dammage based on direction [addon]
 # -reaction skills [addon]
 # -traps/passive area of effect [addon] (can be partially simulated with event triggers)
 #
@@ -336,9 +362,12 @@ $imported["TIM-TBS"] = true
 # -side-view battles like FE (graphic knowledge plus conflict with reaction skills etc., not something I want to code)
 # -battle animations (cast, moving, projectiles etc.) (graphic knowledge, huge)
 # -exp/rewards mid-battle (not something I want to code)
-# -self inventory and trade system (probably already exists somewhere, would be nice to check this)
-# -script-controlled custom victory conditions (would have to define a list or something, I prefer using events instead)
-# -isometric view support (graphic and external script knowledge, not something I want to code)
+# -self inventory and trade system (considering writing patch with Hime's scripts if necessary)
+# -script-controlled custom victory conditions (would have to define a list or
+# something, I prefer using events instead) you currently can disable the auto
+# victory condition (teams routed with judge_win_loss) with script call:
+#   $game_system.custom_battle_end = true
+# -isometric view support (graphic and external script knowledge required)
 #==============================================================================
 
 #==============================================================================
@@ -532,11 +561,15 @@ module TBS
     end
   end
 
+  #set to true for enemies with no face file specified to use their sprite in
+  #the database as a face (centered in the middle)
+  DISPLAY_BAT_AS_FACE = true
+
   #============================================================================
   # Place phase settings
   #============================================================================
   DISPLAY_EMPTY_PARTY = true #display an empty window when no battler is availvable, set to false to hide it
-  PLACE_ACTORS = true #place the actors or they will be randomly put
+  PLACE_ACTORS = true #manually place the actors or they will be randomly put and the battle will start
   PLACE_MUSIC_SWICTH = 0 #if set above 0, you may control whether there is a place phase music or not based on the swicth
   PLACE_MUSIC = RPG::BGM.new("Scene2", 100, 100) #default place music
 
@@ -549,7 +582,17 @@ module TBS
   TRANSPARENT_OPACITY = 0.75 #in 0...1, will be multiplied by the battler's opacity in transparent mode
   #skip the direction choice of the battler at the end of its turn
   SKIP_DIRECTION_CHOICE = false
+  #hides any battler's action that cannot be performed due to its cost
   HIDE_PERFORMED_ACTIONS = true
+  #when the battle is over, reload the original map? Set it to false to have a
+  #behavior like vanilla battles where map events are the same as before the battle
+  #set it to true if you want the map to be reloaded (better for script compatibility)
+  RELOAD_MAP = false
+  #speed of the cursor when sliding in cells per frame
+  CURSOR_SPEED = 2**6 / 256.0
+  #does the cursor slide when pressing the arrow keys?
+  #false if you want the cursor to teleport itself
+  SLIDE_CURSOR = true
 
   #----------------------------------------------------------------------------
   # Turn Wheel
@@ -718,6 +761,7 @@ module TBS
   # You may force a unit to hide the view of every other units, overriding
   # the relationship hide property, to do so, put in an enemy notetag this:
   # <view_obstacle>
+  # (only works for enemies units, this feature is not available to actors)
 
   #----------------------------------------------------------------------------
   # Moves
@@ -820,8 +864,8 @@ module TBS
   #with v a positive or negative value:
   #negative is something bad to get (so good to inflict on opponents)
   #positive is something good to get (so bad to inflict on opponents)
-  #v should be between -10 and +10 to rate how great or bad the state is
-  DEFAULT_AI_STATE_RATING = 0 #if nothing is speicied
+  #v should be between -100 and +100 to rate how great or bad the state is
+  DEFAULT_AI_STATE_RATING = 0 #if nothing is specified
 
   #AIs cannot use items but can use skills, by default the skill is taken
   #randomly with weighted values (like default enemies), but in the case
@@ -860,7 +904,7 @@ module TBS
     #not implemented:
     #TARGET_REL_WEAPON = /^<(attack_target_rel)>/i
     #for states balloons:
-    BALLOON = /^<balloon_id\s*=\s*(\d)\s*>/
+    BALLOON = /^<balloon_id\s*=\s*(\d)\s*>/i
 
     #for enemies only
     #display
@@ -882,47 +926,39 @@ module TBS
     EXTRA_TROOPS = /^extra_enemies\s*=\s*(\[((\s*\d+\s*),?)+\])/i
     #when the state is added:
     REMOVE_CHILDREN = /(^<remove_children\s*>)/i
-  end
 
-  #============================================================================
-  # Map Setup
-  #============================================================================
+    #==========================================================================
+    # Map Setup
+    #==========================================================================
+    #If event names contains the following expressions:
+    module EVENT_NAMES
+      #tbs_extra (makes the event visible and may run but cannot be interacted with)
+      #tbs_event (makes the event part of the active events on the map)
+      EXTRA = /tbs_extra/i
+      TBS_EVENT = /tbs_event/i
+    end #EVENT_NAMES
 
-  #If event names contains the following substrings:
-  module EVENT_NAMES
-    #tbs_extra (makes the event visible and may run but cannot be interacted with)
-    #tbs_event (makes the event part of the active events on the map)
-    EXTRA = 'tbs_extra'
-    TBS_EVENT = 'tbs_event'
+    #If a comment in the event active page contains a specific string:
+    module EVENT_COMMENTS
+      #obstacle i -> puts obstacle corresponding to enemy id i
+      #actor i -> puts actor number i from the party/neutrals here if available
+      #enemy i -> puts enemy number i from the troop here if available
+      #spawn_actor i t -> spawns a new actor i for team t
+      #spawn_enemy i t -> spawns a new enemy i for team t
+      OBSTACLE = /^obstacle (\d+)/i
+      ACTOR = /^actor (\d+)/i
+      ENEMY = /^enemy (\d+)/i
+      SPAWN_ACTOR = /^spawn_actor (\d+) (\d+)/i
+      SPAWN_ENEMY = /^spawn_enemy (\d+) (\d+)/i
 
-    #the following list is read by Game_Map, do not edit it or its order!
-    LIST = [EXTRA, TBS_EVENT]
-  end
-
-  #If a comment in the event active page contains a specific string:
-  module EVENT_COMMENTS
-    #obstacle i -> puts obstacle corresponding to enemy id i
-    #actor i -> puts actor number i from the party/neutrals here if available
-    #enemy i -> puts enemy number i from the troop here if available
-    #spawn_actor i t -> spawns a new actor i for team t
-    #spawn_enemy i t -> spawns a new enemy i for team t
-    OBSTACLE = 'obstacle'
-    ACTOR = 'actor'
-    ENEMY = 'enemy'
-    SPAWN_ACTOR = 'spawn_actor'
-    SPAWN_ENEMY = 'spawn_enemy'
-
-    #enemy_place -> a random place to put an enemy (from team enemy)
-    #party_place -> a selected place to put a party member (from team actor)
-    #team_place t -> a random place for team nb t
-    PLACE_ENEMY = 'enemy_place'
-    PLACE_PARTY = 'party_place'
-    PLACE_TEAM = 'team_place'
-
-    #the following two lists are read by Game_Map, do not edit them or their order!
-    LIST_FIX = [OBSTACLE,ACTOR,ENEMY,SPAWN_ACTOR,SPAWN_ENEMY]
-    LIST_PLACE = [PLACE_ENEMY,PLACE_PARTY,PLACE_TEAM]
-  end
+      #enemy_place -> a random place to put an enemy (from team enemy)
+      #party_place -> a selected place to put a party member (from team actor)
+      #team_place t -> a random place for team nb t
+      PLACE_ENEMY = /^enemy_place/i
+      PLACE_PARTY = /^party_place/i
+      PLACE_TEAM = /^team_place (\d+)/i
+    end #EVENT_COMMENTS
+  end #REGEXP
 
   #============================================================================
   # PREVIEW: to handle ability damage previewing
@@ -994,7 +1030,7 @@ module TBS
   end #PREVIEW
 
   #============================================================================
-  # Highlighted units colors 0 -> used to change unit color based on caster's
+  # Highlighted units colors -> used to change unit color based on caster's
   # friendliness when selected by an ability
   #============================================================================
   #Colors used when units are in area of an ability
@@ -1022,7 +1058,7 @@ module TBS
     #if set to true, ais will test all skills instead of random ones and compare them
     #use this only if your skills heuristics are great and if no skill have unpredictable effetcs
     #like call common events, fleeing combat etc.
-    #if set to false, skills will be picked in a random weighted way, which might
+    #if set to false, skills will be picked in a random weighted way
     ALL_POSSIBILITIES = false
     #a global multiplier of the ratings of states defined in database
     #(they are integers usually between -100 and 100)
@@ -1112,681 +1148,296 @@ module TBS
     Crazy.harm[FRIENDLY] = 1
     Crazy.harm[ENEMY] = -1
   end #AI
+end #TBS
 #==============================================================================
 # End of Configuration
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-# You may look at the storage objects to check notetags examples but you should
-# not edit things below this point
+# Avoid editing anything past this point unless you know what you are doing!
 #==============================================================================
-
-  #============================================================================
-  # Storage objects: are used by TBS to store battlers properties from TBS Core
-  # Do not edit unless you know what you are doing
-  #============================================================================
-  #Hash tables ({}) contain id => property
-  #with id the id of the BaseItem in the database and property what was read in the notetags
-  #Arrays ([]) contain ids of the BaseItem with property,
-  #if the id is not in the array, then the BaseItem do not have the property
-  #Both the Hash tables and the Arrays are set by the notetags from the database
-
-  #Base ranges property = [min_range,max_range,line_of_sight,type]
-  #property may be of double size to contain the area
-  #to set it, put in the notetags:
-  #<range = [m,M,los,type]>
-  #<range = [m,M,los,type,am,aM,alos,atype]>
-  #ex:
-  #<range = [0,5,true,:default]>
-  #<range = [2,3,true,:default,0,2,false,:square]>
-  SKILL_RANGE = {} #for skills
-  ITEM_RANGE = {} #for item
-  WEAPON_RANGE = {} #for user attack
-  ENEMY_RANGE = {} #for enemy attack
-
-  #for skills/items where you want their range to be defined by their weapon
-  #in other words, their range is the same as the base attack:
-  #<attack_range>
-  SKILL_RANGE_LIKE_WEAPON = []
-  ITEM_RANGE_LIKE_WEAPON = []
-
-  #allow enemies (battlers) to obstruct the view of spells/items regardless of the team
-  #used mainly for obstacles
-  #to set it, put:
-  #<view_obstacle>
-  ENEMY_VIEW_OBSTACLE = []
-
-  #TARGET_REL tables have property [friend_status1,friend_status2...]
-  #where friend_status may be SELF/FRIENDLY/NEUTRAL/ENEMY
-  #<target_rel = [a,b]>
-  #ex (to target only neutrals):
-  #<target_rel = [0]>
-  #(to target anyone except yourself):
-  #<target_rel = [-1,0,1]>
-  SKILL_TARGET_REL = {}
-  ITEM_TARGET_REL = {}
-  WEAPON_TARGET_REL = {}
-
-  #not implemented:
-  #for skills/items where you want their target relationship to be defined by their weapon
-  #in other words, their rel is the same as the base attack:
-  #<attack_target_rel>
-  #SKILL_TARGET_REL_LIKE_WEAPON = []
-  #ITEM_TARGET_REL_LIKE_WEAPON = []
-
-  #Property restriciton on the targeted cell by an ability, the
-  #TARGET_PROPERTY contains a string that is evaluated as part of Game_Action class
-  #<target_property = properties>
-  #ex:
-  #<target_property = tgt_empty? && tgt_ground?>
-  SKILL_TARGET_PROPERTY = {}
-  ITEM_TARGET_PROPERTY = {}
-
-  #ratings for ais
-  #put (where x is rating)
-  #<ai_rating = x>
-  #State rating: from -100 to +100, default 0, -100 means
-  #that it's similar to loosing 100% hps, in other words:
-  #I don't want to have this but want to inflict this!
-  #ex:
-  #<ai_rating = -3>
-  STATE_RATING = {}
-  #Skill rating: from 1 to 10, probability of using a skill
-  #ex:
-  #<ai_rating = 4>
-  SKILL_RATING = {}
-
-  #Skill cost rating: override the cost returned by ai heuristic
-  #evaluated in Game_Battler environment with parameters s (the skill)
-  #and t the tactic
-  #ex:
-  #<ai_cost_rating = - t.mp_save * s.mp_cost>
-  SKILL_COST_RATING = {}
-
-  #The move modification or default move set by the obj
-  #<move = m>
-  #ex:
-  #<move = 3>
-  #will add 3 move points when wearing the BaseItem
-  #<move = -2>
-  #will remove 2 move points when wearing the BaseItem
-  ACTOR_MOVE = {}
-  STATE_MOVE = {}
-  WEAPON_MOVE = {}
-  EQUIP_MOVE = {}
-  #<move = 3>
-  #will set the base move to 3 move points when having class_id or the enemy_id
-  CLASS_MOVE = {}
-  ENEMY_MOVE = {}
-
-  #The move_rule set by the obj
-  #<move_rule = name>
-  #ex:
-  #<move_rule = sneak>
-  STATE_MOVEMODE = {}
-  WEAPON_MOVEMODE = {}
-  EQUIP_MOVEMODE = {}
-  ACTOR_MOVEMODE = {}
-  CLASS_MOVEMODE = {}
-  ENEMY_MOVEMODE = {}
-
-  #The battlers added automatically to the troop at the begining of combat
-  #in comments of troops pages:
-  #extra_enemies = [a,b,c]
-  #ex:
-  #extra_enemies = [1,1,4,1]
-  Extra_Troops = {}
-
-  #The enemy display properties
-  #<face_name = name>
-  #ex:
-  #<face_name = Actor1>
-  ENEMY_FACE = {}
-  #id between 0 and 7
-  #<face_index = id>
-  #ex:
-  #<face_index = 3>
-  ENEMY_FACE_INDEX = {}
-  #<charset = name>
-  #ex:
-  #<charset = Monster1>
-  ENEMY_CHARSET = {}
-  #id between 0 and 7
-  #<char_index = id>
-  #ex:
-  #<char_index = id>
-  ENEMY_CHAR_INDEX = {}
-  #<class = name>
-  #ex:
-  #<class = evilkind>
-  ENEMY_CLASS = {}
-  #<description = text>
-  #ex:
-  #<description = I'm a slime!>
-  ENEMY_DESCRIPTION = {}
-
-  #list the actors and the states such that actor with id or under the state
-  #cannot be added in battle through the place phase
-  #<no_battle>
-  ACTOR_NO_BATTLE = []
-  STATE_NO_BATTLE = []
-  #stores the enemies that will be removed upon death avoiding resurection or obstruction,
-  #note that they will still be counted on exp and gold rewards
-  #<remove_on_death>
-  ENEMY_DISAPPEAR = []
-
-  #the battle map that wil be called from the current map, by default the current map is used
-  #<battle_on = map_id>
-  #ex:
-  #<battle_on = 4>
-  CALL_ALTERNATE_MAP = {}
-
-  #all children/summons linked to the battler will be removed if the battler if
-  #the battler is removed from battle or the following state is added:
-  #<remove_children>
-  STATE_REMOVE_CHILDREN = []
-
-  #displays balloon with id x continuously when uner this state as priority:
-  #<balloon_id = x>
-  STATE_BALLOON = {}
-
-##########################################
-# Enemy Display
-##########################################
-  def self.enemy_face(enemy_id)
-    return ENEMY_FACE[enemy_id] ? ENEMY_FACE[enemy_id] : ""
-  end
-  def self.enemy_face_index(enemy_id)
-    return ENEMY_FACE_INDEX[enemy_id] ? ENEMY_FACE_INDEX[enemy_id] : 0
-  end
-  def self.enemy_charset(enemy_id)
-    return ENEMY_CHARSET[enemy_id] ? ENEMY_CHARSET[enemy_id] : ""
-  end
-  def self.enemy_char_index(enemy_id)
-    return ENEMY_CHAR_INDEX[enemy_id] ? ENEMY_CHAR_INDEX[enemy_id] : 0
-  end
-  def self.enemy_class(enemy_id)
-    return ENEMY_CLASS[enemy_id] ? ENEMY_CLASS[enemy_id] : ""
-  end
-  def self.enemy_description(enemy_id)
-    return ENEMY_DESCRIPTION[enemy_id] ? ENEMY_DESCRIPTION[enemy_id] : ""
-  end
-##########################################
-# Move
-##########################################
-
-  def self.class_move(class_id)
-    return CLASS_MOVE[class_id] ? CLASS_MOVE[class_id] : DEFAULT_MOVE
-  end
-
-  def self.enemy_move(enemy_id)
-    return ENEMY_MOVE[enemy_id] ? ENEMY_MOVE[enemy_id] : DEFAULT_MOVE
-  end
-
-#move modifiers
-
-  def self.weapon_move(w_id)
-    return WEAPON_MOVE[w_id] ? WEAPON_MOVE[w_id] : 0
-  end
-
-  def self.equip_move(equip_id)
-    return EQUIP_MOVE[equip_id] ? EQUIP_MOVE[equip_id] : 0
-  end
-
-  def self.state_move(state_id)
-    return STATE_MOVE[state_id] ? STATE_MOVE[state_id] : 0
-  end
-
-  def self.actor_move(actor_id)
-    return ACTOR_MOVE[actor_id] ? ACTOR_MOVE[actor_id] : 0
-  end
-
-##########################################
-# MoveMode move_rule
-##########################################
-  def self.meta_moveMode(id,moveMode_table)
-    name = moveMode_table[id]
-    return name ? (MOVE_NAMES_TO_ID[name] ? MOVE_NAMES_TO_ID[name] : DEFAULT_MOVE_RULE) : DEFAULT_MOVE_RULE
-  end
-
-  def self.state_moveMode(id)
-    return TBS.meta_moveMode(id,STATE_MOVEMODE)
-  end
-  def self.weapon_moveMode(id)
-    return TBS.meta_moveMode(id,WEAPON_MOVEMODE)
-  end
-  def self.equip_moveMode(id)
-    return TBS.meta_moveMode(id,EQUIP_MOVEMODE)
-  end
-  def self.actor_moveMode(id)
-    return TBS.meta_moveMode(id,ACTOR_MOVEMODE)
-  end
-  def self.class_moveMode(id)
-    return TBS.meta_moveMode(id,CLASS_MOVEMODE)
-  end
-  def self.enemy_moveMode(id)
-    return TBS.meta_moveMode(id,ENEMY_MOVEMODE)
-  end
-
-
-##########################################
-# Range
-##########################################
-
-  def self.meta_range(id,default_range,range_table)
-    range = range_table[id] ? range_table[id] : default_range
-    (range.size...default_range.size).each {|i|
-        range << default_range[i]
-    }
-    return range
-  end
-
-  def self.item_range(item_id)
-    return TBS.meta_range(item_id,DEFAULT_ITEM_RANGE,ITEM_RANGE)
-  end
-
-  def self.skill_range(skill_id)
-    return TBS.meta_range(skill_id,DEFAULT_SKILL_RANGE,SKILL_RANGE)
-  end
-
-  def self.weapon_range(weapon_id)
-    return TBS.meta_range(weapon_id,DEFAULT_WEAPON_RANGE,WEAPON_RANGE)
-  end
-
-  def self.enemy_range(enemy_id)
-    return TBS.meta_range(enemy_id,DEFAULT_ENEMY_RANGE,ENEMY_RANGE)
-  end
-
-  def self.always_hide_view(enemy_id)
-    return ENEMY_VIEW_OBSTACLE.include?(enemy_id)
-  end
-
-  #to copy the range of the base attack:
-  def self.skill_range_like_weapon?(skill_id)
-    return SKILL_RANGE_LIKE_WEAPON.include?(skill_id)
-  end
-
-  def self.item_range_like_weapon?(item_id)
-    return ITEM_RANGE_LIKE_WEAPON.include?(item_id)
-  end
-
-##########################################
-# Targeting restrictions (allies,neutrals,enemies)
-##########################################
-
-  def self.meta_targeting_rel(id,for_ally,target_table)
-    l = target_table[id]
-    l = (for_ally ? DEFAULT_ALLY_TARGETTING : DEFAULT_ENEMY_TARGETTING) if l.nil?
-    return l
-  end
-
-  def self.item_targeting_rel(item_id)
-    return TBS.meta_targeting_rel(item_id,$data_items[item_id].for_friend?,ITEM_TARGET_REL)
-  end
-
-  def self.skill_targeting_rel(skill_id)
-    return TBS.meta_targeting_rel(skill_id,$data_skills[skill_id].for_friend?,SKILL_TARGET_REL)
-  end
-
-  #not implemented!
-  #def self.enemy_targeting_rel(enemy_id)
-  #  return TBS.meta_targeting_rel(enemy_id,false,ENEMY_TARGET_REL)
-  #end
-
-  #def self.weapon_targeting_rel(skill_id, weapon_id)
-  #  return TBS.meta_targeting_rel(weapon_id,false,WEAPON_TARGET_REL)
-  #end
-
-  #to copy the targeting restrictions of the base attack:
-  #def self.skill_target_rel_attack?(skill_id)
-  #  return SKILL_TARGET_REL_LIKE_WEAPON.include?(skill_id)
-  #end
-
-  #def self.item_target_rel_attack?(item_id)
-  #  return ITEM_TARGET_REL_LIKE_WEAPON.include?(item_id)
-  #end
-
-##########################################
-# Property on the targeted cell
-##########################################
-  def self.item_targeting_property(item_id)
-    p = ITEM_TARGET_PROPERTY[item_id]
-    return p ? p : "true"
-  end
-
-  def self.skill_targeting_property(skill_id)
-    p = SKILL_TARGET_PROPERTY[skill_id]
-    return p ? p : "true"
-  end
-
-##########################################
-# AI rating on effects
-##########################################
-
-  def self.state_ai_rating(state_id)
-    p = STATE_RATING[state_id]
-    return p.nil? ? DEFAULT_AI_STATE_RATING : p*AI::STATE_RATING_NORM
-  end
-
-  def self.skill_ai_rating(skill_id)
-    p = SKILL_RATING[skill_id]
-    return p.nil? ? DEFAULT_AI_SKILL_RATING : p
-  end
-
-  def self.skill_cost_rating(skill_id)
-    return SKILL_COST_RATING[skill_id]
-  end
-
-##########################################
-# Prevent actor_battle
-##########################################
-
-  def self.actor_no_battle(actor_id)
-    return ACTOR_NO_BATTLE.include?(actor_id)
-  end
-
-  def self.state_no_battle(state_id)
-    return STATE_NO_BATTLE.include?(state_id)
-  end
-
-##########################################
-# BALLOON display of states
-##########################################
-  def self.state_balloon(state_id)
-    return STATE_BALLOON[state_id]
-  end
-
-##########################################
-# Enemy Disappear on death
-##########################################
-
-  def self.enemy_disappear(enemy_id)
-    return ENEMY_DISAPPEAR.include?(enemy_id)
-  end
-
-##########################################
-# Remove children on state infliction
-##########################################
-
-  def self.state_remove_children?(state_id)
-    return STATE_REMOVE_CHILDREN.include?(state_id)
-  end
-
-##########################################
-# AI tactics
-##########################################
-  ENEMY_TACTIC = {} #base priority
-  CLASS_TACTIC = {} #base priority
-  ACTOR_TACTIC = {} #higher priority than class
-  STATE_TACTIC = {} #higher priority than the rest, the state position defines which state to pick
-
-  def self.enemy_tactic(enemy_id)
-    name = ENEMY_TACTIC[enemy_id]
-    name = AI::DEFAULT_TACTIC_NAME unless name
-    return AI::All_AI_Tactics[name]
-  end
-
-  def self.class_tactic(class_id)
-    name = CLASS_TACTIC[class_id]
-    name = AI::DEFAULT_TACTIC_NAME unless name
-    return AI::All_AI_Tactics[name]
-  end
-
-  def self.actor_tactic(actor_id)
-    name = ACTOR_TACTIC[actor_id]
-    #return nil unless name
-    return AI::All_AI_Tactics[name]
-  end
-
-  def self.state_tactic(state_id)
-    name = STATE_TACTIC[state_id]
-    #return nil unless name
-    return AI::All_AI_Tactics[name]
-  end
-end #TBS
-
 #==============================================================================
+# TBS 1-B: AutoConfig
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# Deals with Database loading, uses an ugly but easy to parametrize config
+# system that creates and sets attributes to objects
+#==============================================================================
+#  Modified classes:
+#  module DataManager
+#    alias method: load_database
+#    new method: load_notetags_tbs_core
+#  class RPG::BaseItem
+#    new methods: load_notetags_tbs_core(data_list), after_tbs_notetags_reading,
+#                 ai_tactic, move_rule_id, default_range
+#  class RPG::UsableItem
+#    override method: after_tbs_notetags_reading
+#  class RPG::State
+#    override method: after_tbs_notetags_reading
+#  class RPG::MapInfo
+#    new method: load_notetags_tbs_core(data_list,note)
+#  class RPG::Troop
+#    new methods: members, add_new_members, note, load_notetags_tbs_core(data_list)
 #
-# TBS Note Config
+#  New dynamically generated attributes and accessors for:
+#    RPG::Skill, RPG::Item, RPG::Weapon, RPG::Armor, RPG::State, RPG::Enemy,
+#    RPG::Actor, RPG::Class, RPG::MapInfo, RPG::Troop
 #
+#  New class:
+#    TBS::TBS_Data will store the data to be modified
 #==============================================================================
 
+#============================================================================
+# SNC from Simple Notetag Config
+#============================================================================
+module SNC
+  #--------------------------------------------------------------------------
+  # alias method: prepare_metadata
+  #--------------------------------------------------------------------------
+  class <<self; alias prepare_metadata_tbs prepare_metadata; end
+  def self.prepare_metadata
+    prepare_metadata_tbs
+    include TBS #for aliasing
+    #DATA_SKILLS Config (modify RPG::Skill)
+    DATA_SKILLS.concat([#(variable,        default value,            regexp,                type)
+      Notetag_Data.new(:range,            DEFAULT_SKILL_RANGE,      REGEXP::RANGE              ),
+      Notetag_Data.new(:target_rel,       nil,                      REGEXP::TARGET_REL         ), #nil as it will be overriden by default cases
+      Notetag_Data.new(:target_property,  "true",                   REGEXP::TARGET_PROPERTY,  1),
+      Notetag_Data.new(:weapon_range,     false,                    REGEXP::RANGE_LIKE_WEAPON,2),
+      Notetag_Data.new(:ai_rating,        DEFAULT_AI_SKILL_RATING,  REGEXP::AI_RATING          ),
+      Notetag_Data.new(:cost_rating,      nil,                      REGEXP::AI_COST_RATING,   1),
+      Notetag_Data.new(:move,             0,                        REGEXP::MOVE_MODIFIER      ),
+    ])
+
+    #DATA_ITEMS Config (modify RPG::Item)
+    DATA_ITEMS.concat([
+      Notetag_Data.new(:range,            DEFAULT_ITEM_RANGE,       REGEXP::RANGE              ),
+      Notetag_Data.new(:target_rel,       nil,                      REGEXP::TARGET_REL         ), #nil as it will be overriden by default cases
+      Notetag_Data.new(:target_property,  "true",                   REGEXP::TARGET_PROPERTY,  1),
+      Notetag_Data.new(:weapon_range,     false,                    REGEXP::RANGE_LIKE_WEAPON,2),
+      Notetag_Data.new(:move,             0,                        REGEXP::MOVE_MODIFIER      ),
+    ])
+
+    #DATA_WEAPONS Config (modify RPG::Weapon)
+    DATA_WEAPONS.concat([
+      Notetag_Data.new(:range,            DEFAULT_WEAPON_RANGE,     REGEXP::RANGE              ),
+      Notetag_Data.new(:move,             0,                        REGEXP::MOVE_MODIFIER      ),
+      Notetag_Data.new(:move_rule_name,   nil,                      REGEXP::MOVEMODE,         1),
+    ])
+
+    #DATA_ARMORS Config (modify RPG::Armor)
+    DATA_ARMORS.concat([
+      Notetag_Data.new(:move,             0,                        REGEXP::MOVE_MODIFIER      ),
+      Notetag_Data.new(:move_rule_name,   nil,                      REGEXP::MOVEMODE,         1),
+    ])
+
+    #DATA_STATES Config (modify RPG::State)
+    DATA_STATES.concat([
+      Notetag_Data.new(:move,             0,                        REGEXP::MOVE_MODIFIER      ),
+      Notetag_Data.new(:move_rule_name,   nil,                      REGEXP::MOVEMODE,         1),
+      Notetag_Data.new(:ai_rating,        DEFAULT_AI_STATE_RATING,  REGEXP::AI_RATING          ),
+      Notetag_Data.new(:remove_children,  false,                    REGEXP::REMOVE_CHILDREN,  2),
+      Notetag_Data.new(:no_battle,        false,                    REGEXP::NO_BATTLE,        2),
+      Notetag_Data.new(:tactic_name,      nil,                      REGEXP::AI_TACTIC,        1),
+      Notetag_Data.new(:balloon_id,       nil,                      REGEXP::BALLOON            ),
+    ])
+
+    #DATA_ENEMIES Config (modify RPG::Enemy)
+    DATA_ENEMIES.concat([
+      Notetag_Data.new(:move,             DEFAULT_MOVE,             REGEXP::BASE_MOVE          ),
+      Notetag_Data.new(:move_rule_name,   nil,                      REGEXP::MOVEMODE,         1),
+      Notetag_Data.new(:range,            DEFAULT_ENEMY_RANGE,      REGEXP::RANGE              ),
+      Notetag_Data.new(:tactic_name,      AI::DEFAULT_TACTIC_NAME,  REGEXP::AI_TACTIC,        1),
+      #display:
+      Notetag_Data.new(:face_name,        "",                       REGEXP::FACE_NAME,        1),
+      Notetag_Data.new(:face_index,       0,                        REGEXP::FACE_INDEX         ),
+      Notetag_Data.new(:chararacter_name, "",                       REGEXP::CHARSET,          1),
+      Notetag_Data.new(:chararacter_index,0,                        REGEXP::CHAR_INDEX         ),
+      Notetag_Data.new(:class_name,       "",                       REGEXP::CLASS_NAME,       1),
+      Notetag_Data.new(:description,      "",                       REGEXP::DESCRIPTION,      1),
+      #Specific enemy properties:
+      Notetag_Data.new(:always_hide_view, false,                    REGEXP::ALWAYS_BLOCK_VIEW,2),
+      Notetag_Data.new(:remove_on_death,  false,                    REGEXP::REMOVE_ON_DEATH,  2),
+    ])
+
+    #DATA_ACTORS Config (modify RPG::Actor)
+    DATA_ACTORS.concat([
+      Notetag_Data.new(:move,             0,                        REGEXP::MOVE_MODIFIER      ),
+      Notetag_Data.new(:move_rule_name,   nil,                      REGEXP::MOVEMODE,         1),
+      Notetag_Data.new(:tactic_name,      nil,                      REGEXP::AI_TACTIC,        1),
+      Notetag_Data.new(:no_battle,        false,                    REGEXP::NO_BATTLE,        2),
+    ])
+
+    #DATA_CLASSES Config (modify RPG::Class)
+    DATA_CLASSES.concat([
+      Notetag_Data.new(:move,             DEFAULT_MOVE,             REGEXP::BASE_MOVE          ),
+      Notetag_Data.new(:move_rule_name,   nil,                      REGEXP::MOVEMODE,         1),
+      Notetag_Data.new(:tactic_name,      AI::DEFAULT_TACTIC_NAME,  REGEXP::AI_TACTIC,        1),
+    ])
+
+    #DATA_MAPS Config (modify RPG::MapInfo)
+    DATA_MAPS.concat([
+      Notetag_Data.new(:battle_map,       nil,                      REGEXP::BATTLE_MAP         ),
+    ])
+
+    #DATA_TROOPS Config (modify RPG::Troop)
+    DATA_TROOPS.concat([
+      Notetag_Data.new(:extra_enemies,    [],                       REGEXP::EXTRA_TROOPS       ),
+    ])
+  end #prepare_metadata
+end #SNC
+
+#============================================================================
+# RPG::BaseItem -> parent class of actor, class, skill, item, weapon, armor, enemy, and state.
+#============================================================================
+class RPG::BaseItem
+  #--------------------------------------------------------------------------
+  # alias method: post_metadata_notetags_reading
+  #--------------------------------------------------------------------------
+  alias post_metadata_notetags_reading_tbs post_metadata_notetags_reading
+  def post_metadata_notetags_reading
+    post_metadata_notetags_reading_tbs
+    (@range.size...default_range.size).each {|i| @range << default_range[i]} if @range
+  end
+  #--------------------------------------------------------------------------
+  # new method: ai_tactic -> return the tactic linked to obj, nil if no tactic
+  #--------------------------------------------------------------------------
+  def ai_tactic
+    TBS::AI::All_AI_Tactics[@tactic_name] #@tactic_name may not exist but it is fine
+  end
+  #--------------------------------------------------------------------------
+  # new method: move_rule_id -> return the move_rule_id linked to obj
+  #--------------------------------------------------------------------------
+  def move_rule_id
+    @move_rule_name ? TBS::MOVE_NAMES_TO_ID[@move_rule_name] : TBS::DEFAULT_MOVE_RULE
+  end
+  #--------------------------------------------------------------------------
+  # new method: default_range
+  #--------------------------------------------------------------------------
+  def default_range
+    return TBS::DEFAULT_ITEM_RANGE if is_a?(RPG::Item)
+    return TBS::DEFAULT_WEAPON_RANGE if is_a?(RPG::Enemy)
+    return TBS::DEFAULT_ENEMY_RANGE if is_a?(RPG::Weapon)
+    TBS::DEFAULT_SKILL_RANGE
+  end
+end #RPG::BaseItem
+
+#============================================================================
+# RPG::UsableItem -> parent class of skills and items
+#============================================================================
+class RPG::UsableItem
+  #--------------------------------------------------------------------------
+  # alias method: post_metadata_notetags_reading
+  #--------------------------------------------------------------------------
+  alias post_metadata_notetags_reading_tbs_usableitem post_metadata_notetags_reading
+  def post_metadata_notetags_reading
+    post_metadata_notetags_reading_tbs_usableitem
+    @target_rel = for_friend? ? TBS::DEFAULT_ALLY_TARGETTING : TBS::DEFAULT_ENEMY_TARGETTING unless @target_rel
+  end
+unless $imported["TIM-HiddenSkillTypes"]
+  #--------------------------------------------------------------------------
+  # new method: stype_list -> compatibility inclusion with HiddenSkillTypes
+  #--------------------------------------------------------------------------
+  def stype_list
+    [0]
+  end
+  #--------------------------------------------------------------------------
+  # new method: has_type? -> compatibility inclusion with HiddenSkillTypes
+  #--------------------------------------------------------------------------
+  def has_type?(stype)
+    stype_list.include?(stype)
+  end
+end #$imported["TIM-HiddenSkillTypes"]
+end #RPG::UsableItem
+
+unless $imported["TIM-HiddenSkillTypes"]
+#============================================================================
+# RPG::Skill
+#============================================================================
+class RPG::Skill
+  #--------------------------------------------------------------------------
+  # override method: stype_list
+  #--------------------------------------------------------------------------
+  def stype_list
+    [@stype_id]
+  end
+end #RPG::Skill
+end #$imported["TIM-HiddenSkillTypes"]
+
+#============================================================================
+# RPG::State
+#============================================================================
+class RPG::State
+  #--------------------------------------------------------------------------
+  # alias method: post_metadata_notetags_reading
+  #--------------------------------------------------------------------------
+  alias post_metadata_notetags_reading_tbs_state post_metadata_notetags_reading
+  def post_metadata_notetags_reading
+    post_metadata_notetags_reading_tbs_state
+    @ai_rating *= TBS::AI::STATE_RATING_NORM
+  end
+end #RPG::State
+
+#============================================================================
+# RPG::Troop -> The data class for enemy troop
+#============================================================================
 class RPG::Troop
+  #--------------------------------------------------------------------------
+  # new method: members (hides the @members attribute)
+  #--------------------------------------------------------------------------
   def members
-    if @extra_troops.nil?
-      add_new_members
-    end
+    add_new_members unless @extra_troops
     return @members
   end
+  #--------------------------------------------------------------------------
+  # new method: add_new_members
+  #--------------------------------------------------------------------------
   def add_new_members
-    data = TBS::Extra_Troops[@id]
-    if data != nil
-      for memID in data
-        mem = RPG::Troop::Member.new
-        mem.enemy_id = memID
-        @members << mem
-      end
+    @extra_enemies.each do |id|
+      mem = RPG::Troop::Member.new
+      mem.enemy_id = id
+      @members << mem
     end
     #Set this flag so that we only add the extra's 1 time
     @extra_troops = true
   end
-  #--------------------------------------------------------------------------
-  # * New method: note
-  #--------------------------------------------------------------------------
-  # Reads all "pages" for comments and returns as 'notes'
-  #--------------------------------------------------------------------------
-  def note
-    comment_list = []
-    return @notes if !@notes.nil?
-    for page in @pages
-      next if !page || !page.list || page.list.size <= 0
-      note_page = page.list.dup
-
-      note_page.each do |item|
-        next unless item && (item.code == 108 || item.code == 408)
-        comment_list.push(item.parameters[0])
-      end
-    end
-    @notes = comment_list.join("\r\n")
-    return @notes
-  end
-end
-
-module TBS
-#==============================================================
-# Easy Config by Clarabel
-# Load the settings done in the note place in the editor
-# All note entries must be on separate line
-#==============================================================
-# case ConfigType
-# when nil
-#   eval data
-# when 0
-#   set true
-# when 1
-#   save string
-# when 2
-#   add id to array
-# when 5
-#   add string to hash using mapid and subkey region id
-# when 6
-#   add int to hash using mapid and subkey region id
-# when 7
-#   Add string to array within hash.
-# when 8
-#   Add int to array within hash.
-#
-# REQUIRES VICTOR CORE ENGINE !!
-#==============================================================
-  # a parameter is set wirh an array [ Hash_To_Store, reg_exp, ConfigType]
-  #DATA_SKILLS Config
-  SKILLS_EASY_CONFIG = [
-    [SKILL_RANGE, REGEXP::RANGE],
-    [SKILL_TARGET_REL, REGEXP::TARGET_REL],
-    [SKILL_TARGET_PROPERTY,REGEXP::TARGET_PROPERTY,1],
-    [SKILL_RANGE_LIKE_WEAPON,REGEXP::RANGE_LIKE_WEAPON,2],
-    #[SKILL_TARGET_REL_LIKE_WEAPON,REGEXP::TARGET_REL_WEAPON,2],
-    [SKILL_RATING,REGEXP::AI_RATING],
-    [SKILL_COST_RATING,REGEXP::AI_COST_RATING,1],
-  ]
-
-  #DATA_ITEMS Config
-  ITEMS_EASY_CONFIG=[
-    [ITEM_RANGE, REGEXP::RANGE],
-    [ITEM_TARGET_REL, REGEXP::TARGET_REL],
-    [ITEM_TARGET_PROPERTY,REGEXP::TARGET_PROPERTY,1],
-    [ITEM_RANGE_LIKE_WEAPON,REGEXP::RANGE_LIKE_WEAPON,2],
-    #[ITEM_TARGET_REL_LIKE_WEAPON,REGEXP::TARGET_REL_WEAPON,2],
-  ]
-
-  #DATA_WEAPONS Cconfig
-  WEAPONS_EASY_CONFIG = [
-    [WEAPON_RANGE, REGEXP::RANGE],
-    [WEAPON_MOVE, REGEXP::MOVE_MODIFIER],
-    [WEAPON_MOVEMODE,REGEXP::MOVEMODE,1],
-    [WEAPON_TARGET_REL, REGEXP::TARGET_REL],
-  ]
-
-  #DATA_ARMORS Config
-  ARMORS_EASY_CONFIG =[
-    [EQUIP_MOVE, REGEXP::MOVE_MODIFIER],
-    [EQUIP_MOVEMODE,REGEXP::MOVEMODE,1],
-  ]
-
-  #DATA_ENEMIES Config
-   ENEMIES_EASY_CONFIG =[
-     [ENEMY_MOVE, REGEXP::BASE_MOVE],
-     [ENEMY_MOVEMODE,REGEXP::MOVEMODE,1],
-     [ENEMY_RANGE, REGEXP::RANGE],
-     [ENEMY_FACE, REGEXP::FACE_NAME, 1],
-     [ENEMY_FACE_INDEX, REGEXP::FACE_INDEX],
-     [ENEMY_CHARSET,  REGEXP::CHARSET, 1],
-     [ENEMY_CHAR_INDEX, REGEXP::CHAR_INDEX],
-     [ENEMY_CLASS,  REGEXP::CLASS_NAME, 1],
-     [ENEMY_VIEW_OBSTACLE,REGEXP::ALWAYS_BLOCK_VIEW,2],
-     [ENEMY_DISAPPEAR,REGEXP::REMOVE_ON_DEATH,2],
-     [ENEMY_DESCRIPTION, REGEXP::DESCRIPTION,1],
-     [ENEMY_TACTIC, REGEXP::AI_TACTIC, 1],
-   ]
-
- #DATA_STATES Config
-  STATES_EASY_CONFIG = [
-    [STATE_MOVE, REGEXP::MOVE_MODIFIER],
-    [STATE_MOVEMODE,REGEXP::MOVEMODE,1],
-    [STATE_RATING,REGEXP::AI_RATING],
-    [STATE_REMOVE_CHILDREN,REGEXP::REMOVE_CHILDREN,2],
-    [STATE_NO_BATTLE,REGEXP::NO_BATTLE,2],
-    [STATE_TACTIC,REGEXP::AI_TACTIC,1],
-    [STATE_BALLOON,REGEXP::BALLOON],
-  ]
-
-  ACTOR_EASY_CONFIG = [
-    [ACTOR_MOVE, REGEXP::MOVE_MODIFIER],
-    [ACTOR_MOVEMODE,REGEXP::MOVEMODE,1],
-    [ACTOR_NO_BATTLE,REGEXP::NO_BATTLE,2],
-    [ACTOR_TACTIC,REGEXP::AI_TACTIC,1],
-  ]
-
-  CLASS_EASY_CONFIG = [
-    [CLASS_MOVE, REGEXP::BASE_MOVE],
-    [CLASS_MOVEMODE,REGEXP::MOVEMODE,1],
-    [CLASS_TACTIC,REGEXP::AI_TACTIC,1],
-  ]
-
-  MAP_EASY_CONFIG = [
-    [CALL_ALTERNATE_MAP, REGEXP::BATTLE_MAP],
-  ]
-
-  TROOP_EASY_CONFIG = [
-    [Extra_Troops, REGEXP::EXTRA_TROOPS]
-  ]
-
-#============================================================================
-#  You don't have to modify this
-#============================================================================
-#  End of Easy Config script
-#  This will effectively load the settings for the game
-#============================================================================
-# the database parser
-# type = name of the file
-# all_config = one of the array define above
-  def self.easy_config(type, all_config)
-    data = load_data('Data/'+type+'.rvdata2')
-    max = data.size
-    if type == 'MapInfos'
-      max += 1
-    end
-    for i in 1...max
-      if type == 'MapInfos'
-        filename = sprintf("Data/Map%03d.rvdata2", i)
-        if (File.exist?(filename) == false)
-          next
-        end
-        note = load_data(filename).note
-      else
-        note = data[i].note
-      end
-      note.gsub!(/[\t\r\f]/,"")
-      for line in note.split("\n")
-        for config in all_config
-          line_note = line.clone
-          #unless config[3]
-          #
-          #end
-          line_note.scan(config[1])
-          if $1
-            case config[2]
-            when 8 # hash int array push
-              #config[0][i] = [] if (config[0][i]).nil?
-              config[0][i] = eval("[" + $1 + "]") #push eval data
-            when 7 # hash string array push (as array)
-              #Start new array at hash key
-              config[0][i] = [] if (config[0][i]).nil?
-              config[0][i] << $1
-            when 6 # Custom for Map battle transfers based off area
-              temp = eval($1)
-              config[0][i] ||= {}
-              config[0][i][temp] = eval($2)
-            when 5 # Custom for battlebacks
-              temp = eval($1)
-              config[0][i] ||= {}
-              config[0][i][temp] = $2
-            when 2 # add to array
-              if !config[0].include?(i)
-                config[0] << i
-                config[0].sort!
-              end
-            when 1 # is a string
-              config[0][i] = $1
-            when 0 #is a switch parameters
-              config[0][i] =  true
-            else#value parameter
-              config[0][i] =  eval($1)
-            end
-            break
-          end
-        end
-      end
-    end
-  end
-
-  def self.on_game_start
-    self.easy_config('Skills', SKILLS_EASY_CONFIG)
-    self.easy_config('Items', ITEMS_EASY_CONFIG)
-    self.easy_config('Weapons', WEAPONS_EASY_CONFIG)
-    self.easy_config('Armors', ARMORS_EASY_CONFIG)
-    self.easy_config('Enemies', ENEMIES_EASY_CONFIG)
-    self.easy_config('States', STATES_EASY_CONFIG)
-    self.easy_config('Actors', ACTOR_EASY_CONFIG)
-    self.easy_config('Classes', CLASS_EASY_CONFIG)
-    self.easy_config('MapInfos', MAP_EASY_CONFIG)
-    self.easy_config('Troops', TROOP_EASY_CONFIG)
-  end
-  self.on_game_start
-end #TBS
+end #RPG::Troop
 
 #==============================================================================
 # TBS Part 2: Game Logic
 # =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 # Deals with everything that is not related to display and ais
+#==============================================================================
+
+#==============================================================================
+# TBS 2-A: Setup
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# Deals with classes outside of combat for link purpose
+#==============================================================================
+#  Modified classes:
+#  module SceneManager
+#    alias methods: first_scene_class, call
+#  class Scene_Map < Scene_Base
+#    alias method: pre_terminate
+#    overwrite methode: pre_battle_scene
+#  module Game_Interpreter
+#    alias methods: screen, get_character, command_204, command_236, command_302, command_303
+#    new methods: disable_tbs, enable_tbs, spawn_new_obstacle(enemy_id,posList,force_place = false),
+#                 spawn_new_enemy(enemy_id,posList,team = 2,parent = nil,force_place = false)
+#                 spawn_new_actor(actor_id,posList,team = 0,parent = nil,force_place = false),
+#                 spawn_actor(actor_id,posList,team = 0,setup=false,parent = nil,force_place = false),
+#                 tbs_add_battler(bat,posList,force_place = false),
+#                 tbs_rm_battler(bat), force_tbs_action(bat,skill_id,tgt,check_range = false)
+#  Game_Temp
+#    new attribute: tbs_scene_data
+#    new method: save_was_in_tbs?
+#  class Game_System
+#    new attributes: move_color, help_skill_color, attack_skill_color,
+#                    attack_color, tbs_enabled, turn_mode, place_music,
+#                    help_window, team_sprite, highlight_units, pre_place,
+#                    turn_id, preview_damage, anim_range, confirm_hash, area_blink,
+#                    area_blink_color
+#    alias method: initialize
+#    new methods: tbs_enabled?, reset_default_tbs_config, reset_victory_text,
+#                 set_victory_text(textLines), set_place_music(bgm_name,volume,pitch),
+#                 reset_place_music
 #==============================================================================
 
 #============================================================================
@@ -1813,8 +1464,7 @@ module SceneManager
     scene_class = Scene_TBS_Battle if scene_class == Scene_Battle && $game_system.tbs_enabled?
     sceneManager_call_tbs(scene_class)
   end
-end
-
+end #SceneManager
 
 #============================================================================
 # Scene_Map
@@ -1840,7 +1490,7 @@ class Scene_Map < Scene_Base
     BattleManager.play_battle_bgm unless SceneManager.scene_is?(Scene_TBS_Battle)
     Sound.play_battle_start
   end
-end
+end #Scene_Map
 
 #============================================================================
 # Game_Interpreter -> adds method for tbs activation, allows map interaction
@@ -1904,11 +1554,12 @@ class Game_Interpreter
       @index += 1
       goods.push(@list[@index].parameters)
     end
-    SceneManager.snapshot_for_background
+    #SceneManager.snapshot_for_background
     SceneManager.call(Scene_Shop)
     SceneManager.scene.prepare(goods, @params[4])
-    SceneManager.scene.main #will loop until we leave Scene_Shop
-    SceneManager.scene.perform_transition #updates the graphics back
+    Fiber.yield
+    #SceneManager.scene.main #will loop until we leave Scene_Shop
+    #SceneManager.scene.perform_transition #updates the graphics back
   end
   #--------------------------------------------------------------------------
   # alias method: command_303 -> name input calls in tbs battle are allowed
@@ -1917,11 +1568,12 @@ class Game_Interpreter
   def command_303
     return tbs_command_303 unless SceneManager.scene_is?(Scene_TBS_Battle)
     if $data_actors[@params[0]]
-      SceneManager.snapshot_for_background
+      #SceneManager.snapshot_for_background
       SceneManager.call(Scene_Name)
       SceneManager.scene.prepare(@params[0], @params[1])
-      SceneManager.scene.main #will loop until we leave Scene_Name
-      SceneManager.scene.perform_transition #updates the graphics back
+      Fiber.yield
+      #SceneManager.scene.main #will loop until we leave Scene_Name
+      #SceneManager.scene.perform_transition #updates the graphics back
     end
   end
 
@@ -2016,11 +1668,18 @@ class Game_Interpreter
   end
 end #Game_Interpreter
 
-#==============================================================================
-#
-# TBS Game_System
-#
-#==============================================================================
+#============================================================================
+# Game_Temp -> store the tbs scene data for easier retrieval
+#============================================================================
+class Game_Temp
+  attr_accessor :tbs_scene_data
+  #--------------------------------------------------------------------------
+  # new method: save_was_in_tbs?
+  #--------------------------------------------------------------------------
+  def save_was_in_tbs?
+    @tbs_scene_data #&& !@tbs_scene_data[:@phase].nil?
+  end
+end #Game_Temp
 
 #============================================================================
 # Game_System
@@ -2030,15 +1689,16 @@ class Game_System
   # public instance variables
   #--------------------------------------------------------------------------
   #attr_reader   :battle_events
-  attr_accessor :move_color
-  attr_accessor :help_skill_color
-  attr_accessor :attack_skill_color
-  attr_accessor :attack_color
-  attr_accessor :place_color
-  attr_accessor :tbs_enabled
-  attr_accessor :turn_mode
-  attr_reader   :victory_cond_texts
-  attr_accessor :place_music
+  attr_accessor :move_color         #Color
+  attr_accessor :help_skill_color   #Color
+  attr_accessor :attack_skill_color #Color
+  attr_accessor :attack_color       #Color
+  attr_accessor :place_color        #Color
+  attr_accessor :tbs_enabled        #boolean
+  attr_accessor :turn_mode          #symb in TURN_SYSTEMS
+  attr_reader   :victory_cond_texts #Array of texts
+  attr_accessor :place_music        #RPG::BGM
+  attr_accessor :custom_battle_end  #boolean
 
   #for options menu
   attr_accessor :help_window, :team_sprite, :highlight_units, :pre_place,
@@ -2056,6 +1716,8 @@ class Game_System
     #@battle_events       = {}
     @turn_mode = TBS::DEFAULT_TURN_SYSTEM
     @tbs_enabled         = true
+    @custom_battle_end   = false  #set this to true if you want to make your own
+                                  #battle checking with event calls!
     tbs_gs_init
   end
 
@@ -2116,13 +1778,24 @@ class Game_System
   def reset_place_music
     @place_music = TBS::PLACE_MUSIC
   end
-end
+end #Game_System
 
 #==============================================================================
-#
-# TBS Game_Character_TBS
-#
+# TBS 2-B: Game_Character_TBS
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# Deals with character in TBS, a short class
 #==============================================================================
+#  new class:
+#  class Game_Character_TBS < Game_Character
+#==============================================================================
+
+
+#============================================================================
+# Game_CharacterBase: adds mirror attribute for target sprite
+#============================================================================
+class Game_CharacterBase
+  attr_accessor :animation_mirror
+end #Game_CharacterBase
 
 #============================================================================
 # Game_Character_TBS: used inside all tbs battlers to position them and apply effects
@@ -2212,12 +1885,68 @@ class Game_Character_TBS < Game_Character
   def screen_z
     super + ($game_system.highlight_units ? TBS::TRANSPARENT_Z : 0)
   end
-end
+
+  #--------------------------------------------------------------------------
+  # override method: hue
+  #--------------------------------------------------------------------------
+  def hue
+    @battler.battler_hue
+  end
+end #Game_Character_TBS
 
 #==============================================================================
 #
 # TBS Game_Battler
 #
+#==============================================================================
+
+#==============================================================================
+# TBS 2-C: Game_Battler
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# Handles Game_BattlerBase, Game_Battler and Game_Actor and Game_Enemy
+#==============================================================================
+#  modified classes:
+#
+#  class Game_BattlerBase
+#    new attribute: initiative
+#    new method: roll_initiative, threat_from(bat)
+#
+#  class Game_Battler < Game_BattlerBase
+#    new attributes (private): tbs_active, has_played
+#    new attributes: mmov, spent_mov, char, character_name, character_index, face_name,
+#                    face_index, team, parent, tbs_battler, ai, turn_id, dmg_preview
+#    alias methods: initialize, on_battle_start, on_action_end, on_turn_end, on_battle_end, hide, add_new_state(state_id), remove_current_action
+#    override method: sprite
+#    overwrite method: opposite?
+#    new methods: pos, moveto(x,y), nickname, level, skip_turn(new_dir),
+#                 on_turn_start, is_active?, update_char, update, tbs_entrance, can_battle?,
+#                 set_obstacle, obstacle?, mmov, available_mov, can_move?, move_rule_id,
+#                 force_move_through_path(route,cost), cut_route(route,cost,move_points),
+#                 move_through_path(route, cost), can_occupy?(pos), can_cross_bat?(moveRule,other_battler),
+#                 calc_pos_move(move_distance = available_mov, forbidden_list = []),
+#                 reverse_calc_pos_move(target_pos = pos, move_distance = available_mov, forbidden_list = []),
+#                 astar_heuristic(cost,p,tgt,min_cost), astar(tgt,move_distance = available_mov, forbidden_list = []),
+#                 true_friend_status(other), friend_status(other), get_range(id,type), get_range_weapon, gen_targets(spellRg),
+#                 gen_area(tgt,spellRg), always_hide_view?, hide_view?(other), remove_on_death?,
+#                 screen_x, screen_y, screen_z, init_ai, player_controllable?, skill_rating(skill_id),
+#                 attack_range?(id,type), has_played?, can_cross?, can_cross_ev?(moveRule,dir,event)
+#                 tbs_leave, force_tbs_action(skill_id, tgt, check_range = false),
+#                 prepare_preview_damage(user,item), preview_damage(user,item),
+#                 preview_effects(user,item), displayed_area_affected?, children,
+#                 get_ai_tactic, skill_cost_eval(formula,s,t), get_state_balloon
+#
+#  class Game_Actor < Game_Battler
+#    alias methods: initialize, set_graphic, make_actions
+#    override methods: move_rule_id, mmov, get_range_weapon, screen_x, screen_y, screen_z, can_battle?, get_ai_tactic
+#    new method: ai_usable_skills
+#
+#  class Game_Enemy < Game_Battler
+#    new attributes: class_name, last_skill
+#    alias methods: initialize, transform, sprite (if YEA-BattleEngine), make_actions
+#    override methods: move_rule_id, mmov, always_hide_view?, get_range_weapon, remove_on_death?, skill_rating(skill_id), get_ai_tactic
+#    overwrite methods: screen_x, screen_y, screen_z
+#    new methods: load_tbs_enemy_data(enemy_id), clear_actions, input, next_command, prior_command
+#                 ai_usable_skills, usable_skills, description
 #==============================================================================
 
 #============================================================================
@@ -2288,6 +2017,15 @@ class Game_Battler < Game_BattlerBase
   end
 
   #--------------------------------------------------------------------------
+  # alias method: item_apply -> adds extra effects (if any)
+  #--------------------------------------------------------------------------
+  alias tbs_item_apply item_apply
+  def item_apply(user, item)
+    tbs_item_apply(user,item)
+    add_mov(item.move) if @result.hit?
+  end
+
+  #--------------------------------------------------------------------------
   # new method: pos -> the position on the map of the battler
   #--------------------------------------------------------------------------
   def pos
@@ -2304,8 +2042,12 @@ class Game_Battler < Game_BattlerBase
   #--------------------------------------------------------------------------
   # new methods: nickname, level
   #--------------------------------------------------------------------------
-  def nickname; ""; end
-  def level; 0; end
+  unless method_defined?(:nickname)
+    def nickname; ""; end
+  end
+  unless method_defined?(:level)
+    def level; 0; end
+  end
 
   #--------------------------------------------------------------------------
   # alias method: on_battle_start -> called at the begining of battle
@@ -2376,7 +2118,10 @@ class Game_Battler < Game_BattlerBase
   #--------------------------------------------------------------------------
   # new method: on_turn_start -> Processing at Begining of battler's turn
   #--------------------------------------------------------------------------
+  def tbs_old_on_turn_start; end
+  alias tbs_old_on_turn_start on_turn_start if defined?(on_turn_start)
   def on_turn_start
+    tbs_old_on_turn_start #non-empty if another script has defined it like Hime's Effect Manager
     #t = $game_troop.turn_count
     @has_played = false
     @tbs_active = true #unless @my_turn >= t #skip turn repetition
@@ -2412,8 +2157,8 @@ class Game_Battler < Game_BattlerBase
   # new method: get_state_balloon
   #--------------------------------------------------------------------------
   def get_state_balloon
-    s = @states.find{|s| TBS.state_balloon(s)}
-    return s ? TBS.state_balloon(s) : 0
+    s = states.find{|s| s.balloon_id}
+    return s ? s.balloon_id : 0
   end
 
   #--------------------------------------------------------------------------
@@ -2476,6 +2221,14 @@ class Game_Battler < Game_BattlerBase
   #--------------------------------------------------------------------------
   def available_mov
     return mmov - @spent_mov
+  end
+
+  #--------------------------------------------------------------------------
+  # new method: add_mov -> adds or remove move points for the current target's
+  # turn (reset itself at the end of their turn)
+  #--------------------------------------------------------------------------
+  def add_mov(d)
+    @spent_mov -= d
   end
 
   #--------------------------------------------------------------------------
@@ -2543,10 +2296,21 @@ class Game_Battler < Game_BattlerBase
   TEST_DIR = [ [2, 0, 1], [4, -1, 0], [6, 1, 0], [8, 0, -1] ]
 
   #--------------------------------------------------------------------------
-  # new method: can_occupy? -> can the battler stay in this cell? return true iff no other battle occupies the cell
+  # new method: can_occupy? -> can the battler stay in this cell? return true
+  # iff no other battle occupies the cell
   #--------------------------------------------------------------------------
   def can_occupy?(pos)
-    return $game_map.occupied_by?(pos[0],pos[1]).nil?
+    return false if $game_map.battler_at(*pos)
+    return false if $game_map.battle_events_at(*pos).any?{|ev| !can_occupy_ev?(ev)}
+    return true
+  end
+
+  #--------------------------------------------------------------------------
+  # new method: can_occupy_ev? -> can the battler occupies the same cell as
+  # this event? (note: can_cross_ev? is already a precondition)
+  #--------------------------------------------------------------------------
+  def can_occupy_ev?(event)
+    true
   end
 
   #--------------------------------------------------------------------------
@@ -2556,10 +2320,12 @@ class Game_Battler < Game_BattlerBase
   def can_cross?(moveRule,dir,prev_pos,nu_pos)
     return false unless TBS.tbs_passable?(prev_pos[0],prev_pos[1],dir,moveRule.travel_mode)
     return false unless TBS.tbs_passable?(nu_pos[0],nu_pos[1],TBS.reverse_dir(dir),moveRule.travel_mode)
-    battler2 = $game_map.occupied_by?(nu_pos[0],nu_pos[1])
-    return false unless battler2.nil? || can_cross_bat?(moveRule,battler2)
-    evList = $game_map.battle_events_at(nu_pos[0],nu_pos[1])
-    return false if evList.any? {|event| !can_cross_ev?(moveRule,dir,event)}
+    batlist = $game_map.battlers_at(*nu_pos)
+    return false if batlist.any?{|b| !can_cross_bat?(moveRule,b)}
+    #battler2 = $game_map.battler_at(nu_pos[0],nu_pos[1])
+    #return false unless battler2.nil? || can_cross_bat?(moveRule,battler2)
+    evlist = $game_map.battle_events_at(nu_pos[0],nu_pos[1])
+    return false if evlist.any? {|event| !can_cross_ev?(moveRule,dir,event)}
     return true
   end
 
@@ -2597,11 +2363,11 @@ class Game_Battler < Game_BattlerBase
   # optional parameter:
   # - forbidden_list containing specific positions excluded from paths
   #-------------------------------------------------------------------------------------------------------------
-  def calc_pos_move(move_distance = available_mov, forbidden_list = [])
+  def calc_pos_move(move_distance = available_mov, src = pos, forbidden_list = [])
     #return {},{} unless can_move?
     moveRule = MoveRule.new(move_rule_id)
     #start position initialization
-    start_pos = pos.x, pos.y    #push starting position
+    start_pos = *src    #push starting position
     route = {start_pos => []}                                  #initialize route #Push empty route for starting postion
     cost = {start_pos => 0}                                       #start position cost = 0
     return route,cost unless can_move?
@@ -2626,8 +2392,10 @@ class Game_Battler < Game_BattlerBase
     end
 
     for _pos in cost.keys #check all positions and remove the ones you can't stay at
-      battler2 = $game_map.occupied_by?(_pos[0], _pos[1])
-      route.delete(_pos) unless battler2.nil? || can_cross_bat?(moveRule,battler2)
+      batlist = $game_map.battlers_at(*_pos)
+      route.delete(_pos) if batlist.any?{|b| !can_cross_bat?(moveRule,b)}
+      #battler2 = $game_map.battler_at(_pos[0], _pos[1])
+      #route.delete(_pos) unless battler2.nil? || can_cross_bat?(moveRule,battler2)
       #route.delete(pos) unless can_occupy?(pos)
     end
     return route, cost
@@ -2643,9 +2411,9 @@ class Game_Battler < Game_BattlerBase
   #-------------------------------------------------------------------------------------------------------------
   def reverse_calc_pos_move(target_pos = pos, move_distance = available_mov, forbidden_list = [])
     prev_x, prev_y = pos.x, pos.y
-    moveto(target_pos[0],target_pos[1])
-    r,c = calc_pos_move(move_distance, forbidden_list)
-    moveto(prev_x, prev_y)
+    #moveto(target_pos[0],target_pos[1])
+    r,c = calc_pos_move(move_distance, target_pos, forbidden_list)
+    #moveto(prev_x, prev_y)
 
     moveRule = MoveRule.new(move_rule_id)
     cost = $game_map.cost_move(moveRule,target_pos[0],target_pos[1],0)
@@ -2707,22 +2475,17 @@ class Game_Battler < Game_BattlerBase
     return route[target], cost[target]
   end
 
-  #def cancel_move_path(cost)
-  #  @char.set_move_route([])
-  #  @spent_mov -= cost
-  #  moveto(@old_pos.x,@old_pos.y)
-  #  @char.set_direction(@old_dir)
-  #end
-
   #--------------------------------------------------------------------------
-  # overwrite method: opposite? -> now the team matters instead of the battler's class
+  # overwrite method: opposite? -> now the team matters instead of the
+  # battler's class
   #--------------------------------------------------------------------------
   def opposite?(battler)
     true_friend_status(battler) == TBS::ENEMY || battler.magic_reflection
   end
 
   #--------------------------------------------------------------------------
-  # new method: true_friend_status -> checks the relationship with another battler
+  # new method: true_friend_status -> checks the relationship with another
+  # battler
   #--------------------------------------------------------------------------
   def true_friend_status(other)
     return TBS::SELF if self.equal?(other)
@@ -2741,48 +2504,53 @@ class Game_Battler < Game_BattlerBase
   end
 
   #--------------------------------------------------------------------------
-  # new method: getRange -> returns a SpellRange associated to an ability
+  # new method: get_range -> returns a SpellRange associated to an ability
   #--------------------------------------------------------------------------
   #id is id of the ability in the database
   #type is the ability type, either :skill or :item
-  def getRange(id,type)
-    range =  nil
-    case type
-    when :item
-      range = attack_range?(id,type) ? getRangeWeapon() : TBS.item_range(id)
-    when :skill
-      range = attack_range?(id,type) ? getRangeWeapon() : TBS.skill_range(id)
+  def get_range(id,type)
+    range = nil
+    if attack_range?(id,type)
+      range = get_range_weapon
+    else
+      ability = type == :skill ? $data_skills[id] : $data_items[id]
+      range = ability.range
     end
     r2 = range.each_slice(4).to_a
     return spellRg = SpellRange.new(r2[0],r2[1])
   end
 
   #--------------------------------------------------------------------------
-  # new method: attack_range? -> returns true if the skill/item uses an attack range
+  # new method: attack_range? -> returns true if the skill/item uses an
+  # attack range
   #--------------------------------------------------------------------------
   def attack_range?(id,type)
-    (type == :skill && (id == attack_skill_id || TBS.skill_range_like_weapon?(id))) || (type == :item && TBS.item_range_like_weapon?(id))
+    ability = type == :skill ? $data_skills[id] : $data_items[id]
+    return (type == :skill && id == attack_skill_id) || ability.weapon_range
   end
 
   #--------------------------------------------------------------------------
-  # new method: getRangeWeapon -> returns an array to initialize the SpellRange of the attack skill
+  # new method: get_range_weapon -> returns an array to initialize the
+  # SpellRange of the attack skill
   #--------------------------------------------------------------------------
-  def getRangeWeapon
-    TBS.DEFAULT_WEAPON_RANGE
+  def get_range_weapon
+    TBS::DEFAULT_WEAPON_RANGE
   end
 
   #--------------------------------------------------------------------------
-  # new method: genTgt -> returns an array of [x,y] cells that the spell may target from the current position
+  # new method: gen_targets -> returns an array of [x,y] cells that the spell
+  # may target from the current position
   #--------------------------------------------------------------------------
-  def genTgt(spellRg)
-    TBS.getTargetsList(self,pos,spellRg)
+  def gen_targets(spellRg)
+    TBS.get_targets(self,pos,spellRg)
   end
 
   #--------------------------------------------------------------------------
-  # new method: genArea -> returns an array of [x,y] cells that are covered by the area of the spell on tgt
+  # new method: gen_area -> returns an array of [x,y] cells that are covered
+  # by the area of the spell on tgt
   #--------------------------------------------------------------------------
-  def genArea(tgt,spellRg)
-    TBS.getArea(self,pos,tgt,spellRg)
+  def gen_area(tgt,spellRg)
+    TBS.get_area(self,pos,tgt,spellRg)
   end
 
   #--------------------------------------------------------------------------
@@ -2791,7 +2559,8 @@ class Game_Battler < Game_BattlerBase
   def always_hide_view?; false; end
 
   #--------------------------------------------------------------------------
-  # new method: hide_view? -> return if this battler hides the view from other (when other tries to cast an ability)
+  # new method: hide_view? -> return if this battler hides the view from
+  # other (when other tries to cast an ability)
   #--------------------------------------------------------------------------
   def hide_view?(other)
     return false if dead? && TBS::DEAD_REVEAL_VIEW
@@ -2804,25 +2573,27 @@ class Game_Battler < Game_BattlerBase
   end
 
   #--------------------------------------------------------------------------
-  # new method: remove_on_death? -> by default, obstacles are removed forever from battles when dying
+  # new method: remove_on_death? -> by default, obstacles are removed forever
+  # from battles when dying
   #--------------------------------------------------------------------------
   def remove_on_death?; obstacle?; end
 
   #--------------------------------------------------------------------------
-  # alias method: add_new_state -> remove the battler from the map when dead if conditions are met
-  # remove the children too if the state deletes them
+  # alias method: add_new_state -> remove the battler from the map when dead
+  # if conditions are met. Remove the children too if the state deletes them
   #--------------------------------------------------------------------------
   alias tbs_add_new_state add_new_state
   def add_new_state(state_id)
     tbs_add_new_state(state_id)
     if SceneManager.scene_is?(Scene_TBS_Battle) && SceneManager.scene.phase
-      SceneManager.scene.remove_children(self) if TBS.state_remove_children?(state_id)
+      SceneManager.scene.remove_children(self) if $data_states[state_id].remove_children
       SceneManager.scene.prepare_remove_battler(self) if state_id == death_state_id && remove_on_death?
     end
   end
 
   #--------------------------------------------------------------------------
-  # override method: sprite -> used to refer to the sprite of the battler (here a Sprite_Character_TBS)
+  # override method: sprite -> used to refer to the sprite of the battler
+  # (here a Sprite_Character_TBS)
   #--------------------------------------------------------------------------
   #(see Victor Core Engine for parent call)
   def sprite
@@ -2854,7 +2625,8 @@ class Game_Battler < Game_BattlerBase
   end
 
   #--------------------------------------------------------------------------
-  # new method: player_controllable? -> returns if the player may input the battler or not
+  # new method: player_controllable? -> returns if the player may input the
+  # battler or not
   #--------------------------------------------------------------------------
   #a battler is controllable by the player if it is part of specific teams and
   #may play normally (not confused, no autobattle etc.)
@@ -2863,10 +2635,11 @@ class Game_Battler < Game_BattlerBase
   end
 
   #--------------------------------------------------------------------------
-  # new method: skill_rating -> a value > 0 that represents how likely the skill is to be used
+  # new method: skill_rating -> a value > 0 that represents how likely the
+  # skill is to be used
   #--------------------------------------------------------------------------
   def skill_rating(skill_id)
-    return TBS.skill_ai_rating(skill_id)
+    $data_skills[skill_id].ai_rating
   end
 
   #--------------------------------------------------------------------------
@@ -2879,13 +2652,14 @@ class Game_Battler < Game_BattlerBase
   # Casts skill_id on target position, does not check any range property
   # If check_range, the action will be used only if tgt is in range from
   # battler's position
-  # If check_movability, the battler may act only if movable (not dead, paralyzed etc.)
+  # If check_movability, the battler may act only if movable (not dead,
+  # paralyzed etc.)
   # tgt is an array [x,y]
   #--------------------------------------------------------------------------
   def force_tbs_action(skill_id, tgt, check_range = false, check_movability = true)
     return unless SceneManager.scene_is?(Scene_TBS_Battle)
     return if check_movability && !movable?
-    return if check_range && !TBS.getTargetsList(self,pos,getRange(skill_id,:skill)).include?[tgt]
+    return if check_range && !TBS.get_targets(self,pos,get_range(skill_id,:skill)).include?[tgt]
     action = Game_Action.new(self, true)
     action.set_skill(skill_id)
     action.set_target(tgt)
@@ -2895,9 +2669,18 @@ class Game_Battler < Game_BattlerBase
   end
 
   #--------------------------------------------------------------------------
-  # new method: prepare_preview_damage -> links the ability stats to an attribute
-  # @dmg_preview being an array [string,colorArray], will be set to nil when
-  # Sprite_DamagePreview reads it
+  # new method: item_preview_tgt_dependant? -> asks if item used by self will
+  # change preview display whenever the target changes (overwritten for
+  # directionnal positionning effects addon)
+  #--------------------------------------------------------------------------
+  def item_preview_tgt_dependant?(item)
+    false
+  end
+
+  #--------------------------------------------------------------------------
+  # new method: prepare_preview_damage -> links the ability stats to an
+  # attribute @dmg_preview being an array [string,colorArray], will be set
+  # to nil when Sprite_DamagePreview reads it
   #--------------------------------------------------------------------------
   def prepare_preview_damage(user,item)
     p = Preview_DamageData.new(self,user,item)
@@ -2906,9 +2689,10 @@ class Game_Battler < Game_BattlerBase
   end
 
   #--------------------------------------------------------------------------
-  # new method: preview_damage -> returns an array that will be read by Preview_DamageData
-  # to display damage preview and help ai rate results
-  # Any change to make_damage_value method should be imported here or in preview_effects
+  # new method: preview_damage -> returns an array that will be read by
+  # Preview_DamageData to display damage preview and help ai rate results
+  # Any change to make_damage_value method should be imported here or in
+  # preview_effects
   #--------------------------------------------------------------------------
   def preview_damage(user,item)
     value = item.damage.eval(user, self, $game_variables)
@@ -2941,54 +2725,62 @@ class Game_Battler < Game_BattlerBase
     #result[:added_debuffs] = {}
     #result[:removed_debuffs] = {}
     result[:grow] = {} #store a hash table of stat => increment
+    #skip some effect checking since hp/mp/tp may be modified by damage formula
     discarded_verif = [EFFECT_RECOVER_HP, EFFECT_RECOVER_MP, EFFECT_GAIN_TP]
     usable_effects = item.effects.select{|effect| discarded_verif.include?(effect.code) || item_effect_test(user,item,effect)}
     usable_effects.each do |effect|
-      case effect.code
-      when EFFECT_RECOVER_HP
-        value = (mhp * effect.value1 + effect.value2) * rec
-        value *= user.pha if item.is_a?(RPG::Item)
-        value = value.to_i
-        result[:hp] += value
-      when EFFECT_RECOVER_MP
-        value = (mmp * effect.value1 + effect.value2) * rec
-        value *= user.pha if item.is_a?(RPG::Item)
-        value = value.to_i
-        result[:mp] += value
-      when EFFECT_GAIN_TP
-        result[:tp] += effect.value1.to_i
-      when EFFECT_ADD_STATE #:item_effect_add_state
-        if effect.data_id == 0 #attack
-          user.atk_states.each do |state_id|
-            c = result[:added_states][state_id]
-            c = result[:added_states][state_id] = 0 if c.nil?
-            chance = effect.value1
-            chance *= state_rate(state_id)
-            chance *= user.atk_states_rate(state_id)
-            chance *= luk_effect_rate(user)
-            result[:added_states][state_id] += (1-c)*chance
-          end
-        else
-          state_id = effect.data_id
+      preview_effect(user,item,effect,result)
+    end
+    return result
+  end
+  #--------------------------------------------------------------------------
+  # new method: preview_effect -> handle effects one by one
+  # result is a hash table from preview_effects method
+  #--------------------------------------------------------------------------
+  def preview_effect(user,item,effect,result)
+    case effect.code
+    when EFFECT_RECOVER_HP
+      value = (mhp * effect.value1 + effect.value2) * rec
+      value *= user.pha if item.is_a?(RPG::Item)
+      value = value.to_i
+      result[:hp] += value
+    when EFFECT_RECOVER_MP
+      value = (mmp * effect.value1 + effect.value2) * rec
+      value *= user.pha if item.is_a?(RPG::Item)
+      value = value.to_i
+      result[:mp] += value
+    when EFFECT_GAIN_TP
+      result[:tp] += effect.value1.to_i
+    when EFFECT_ADD_STATE #:item_effect_add_state
+      if effect.data_id == 0 #attack
+        user.atk_states.each do |state_id|
           c = result[:added_states][state_id]
           c = result[:added_states][state_id] = 0 if c.nil?
           chance = effect.value1
-          chance *= state_rate(state_id)  if opposite?(user)
-          chance *= luk_effect_rate(user) if opposite?(user)
+          chance *= state_rate(state_id)
+          chance *= user.atk_states_rate(state_id)
+          chance *= luk_effect_rate(user)
           result[:added_states][state_id] += (1-c)*chance
         end
-      when EFFECT_REMOVE_STATE #:item_effect_remove_state
+      else
+        state_id = effect.data_id
+        c = result[:added_states][state_id]
+        c = result[:added_states][state_id] = 0 if c.nil?
         chance = effect.value1
-        c = result[:removed_states][state_id]
-        c = 0 if c.nil?
-        result[:removed_states][state_id] = c + (1-c)*chance
-      when EFFECT_GROW
-        v = result[:grow][effect.data_id]
-        v = 0 if v.nil?
-        result[:grow][effect.data_id] = v + effect.value1.to_i
+        chance *= state_rate(state_id)  if opposite?(user)
+        chance *= luk_effect_rate(user) if opposite?(user)
+        result[:added_states][state_id] += (1-c)*chance
       end
+    when EFFECT_REMOVE_STATE #:item_effect_remove_state
+      chance = effect.value1
+      c = result[:removed_states][state_id]
+      c = 0 if c.nil?
+      result[:removed_states][state_id] = c + (1-c)*chance
+    when EFFECT_GROW
+      v = result[:grow][effect.data_id]
+      v = 0 if v.nil?
+      result[:grow][effect.data_id] = v + effect.value1.to_i
     end
-    return result
     #EFFECT_RECOVER_HP    => :item_effect_recover_hp,
     #EFFECT_RECOVER_MP    => :item_effect_recover_mp,
     #EFFECT_GAIN_TP       => :item_effect_gain_tp,
@@ -3005,13 +2797,18 @@ class Game_Battler < Game_BattlerBase
   end
 
   #--------------------------------------------------------------------------
-  # new method: displayed_area_affected? -> returns true if the battler is in area of
-  # ability for display features
-  # TODO: change this to attribute for faster reading
+  # new method: displayed_area_affected? -> returns true if the battler is in
+  # area of ability for display features (improved to attribute reading)
   #--------------------------------------------------------------------------
   def displayed_area_affected?
     return false unless SceneManager.scene_is?(Scene_TBS_Battle)
-    return SceneManager.scene.battlers_in_area.include?(self)
+    return false unless SceneManager.scene.tbs_cursor.requires_area?
+    #redo the checking if cursor's area has changed
+    #(skill selection or cursor movement)
+    if SceneManager.scene.tbs_cursor.area_changed?
+      @in_area = SceneManager.scene.battlers_in_area.include?(self)
+    end
+    @in_area
   end
 
   #--------------------------------------------------------------------------
@@ -3022,7 +2819,13 @@ class Game_Battler < Game_BattlerBase
     return [] unless SceneManager.scene_is?(Scene_TBS_Battle)
     return SceneManager.scene.tactics_battlers.select{|b| b.parent == self}
   end
-end
+
+  #--------------------------------------------------------------------------
+  # new method: tbs_post_item_effects -> global item effects tied to tbs,
+  # called after the use_item method (modified by postionning addon)
+  #--------------------------------------------------------------------------
+  def tbs_post_item_effects(item,targets); end
+end #Game_Battler
 
 #==============================================================================
 #
@@ -3066,16 +2869,10 @@ class Game_Actor < Game_Battler
   # override method: move_rule_id -> search in the associated baseitems the move_rule_id
   #--------------------------------------------------------------------------
   def move_rule_id
-    modeModeL = [TBS.actor_moveMode(@actor_id),TBS.class_moveMode(@class_id)]
-    for a in armors
-      modeModeL += [TBS.equip_moveMode(a.id)]
-    end
-    for w in weapons
-      modeModeL += [TBS.weapon_moveMode(w.id)]
-    end
-    for s_id in @states
-      modeModeL += [TBS.state_moveMode(s_id)]
-    end
+    modeModeL = [actor.move_rule_id, self.class.move_rule_id]
+    modeModeL += armors.map{|a| a.move_rule_id}
+    modeModeL += weapons.map{|w| w.move_rule_id}
+    modeModeL += states.map{|s| s.move_rule_id}
     return TBS.move_rule_priority(modeModeL)
   end
 
@@ -3083,26 +2880,20 @@ class Game_Actor < Game_Battler
   # override method: mmov -> search in the associated baseitems the total mmov
   #--------------------------------------------------------------------------
   def mmov
-    move = TBS.class_move(@class_id)
-    move += TBS.actor_move(@actor_id)
-    for a in armors
-      move += TBS.equip_move(a.id)
-    end
-    for w in weapons
-      move += TBS.weapon_move(w.id)
-    end
-    for s_id in @states
-      move += TBS.state_move(s_id)
-    end
+    move = self.class.move
+    move += actor.move
+    move += armors.inject(0) {|r,a| r+a.move}
+    move += weapons.inject(0) {|r,w| r+w.move}
+    move += states.inject(0) {|r,s| r+s.move}
     return [move,0].max
   end
 
   #--------------------------------------------------------------------------
-  # override method: getRangeWeapon -> take the range of the first weapon
+  # override method: get_range_weapon -> take the range of the first weapon
   #--------------------------------------------------------------------------
-  def getRangeWeapon
-    weapon =  weapons[0]
-    range = weapon.nil? ?  TBS.weapon_range(0) :  TBS.weapon_range(weapon.id)
+  def get_range_weapon
+    range = TBS::DEFAULT_WEAPON_RANGE
+    range = weapons[0].range if weapons[0]
     return range
   end
 
@@ -3137,7 +2928,7 @@ class Game_Actor < Game_Battler
   # override method: can_battle? -> some actors may not battle
   #--------------------------------------------------------------------------
   def can_battle?
-    return !(TBS.actor_no_battle(@actor_id) || @states.any? {|s| TBS.state_no_battle(s)})
+    return !(actor.no_battle || states.any? {|s| s.no_battle})
   end
 
   #--------------------------------------------------------------------------
@@ -3146,10 +2937,11 @@ class Game_Actor < Game_Battler
   #ai related
   def ai_usable_skills
     sList = usable_skills
-    sList.collect!{|s| [s,TBS.skill_ai_rating(s.id)]}
+    sList.collect!{|s| [s,s.ai_rating]}
     l1 = [] #add the attack and guard skills
     for id in [attack_skill_id,guard_skill_id]
-      l1.push([$data_skills[id],TBS.skill_ai_rating(id)])
+      s = $data_skills[id]
+      l1.push([s,s.ai_rating])
     end
     return l1 + sList
   end
@@ -3194,11 +2986,11 @@ class Game_Enemy < Game_Battler
   # new method: load_tbs_enemy_data
   #--------------------------------------------------------------------------
   def load_tbs_enemy_data(enemy_id)
-    @character_name = TBS.enemy_charset(enemy_id)
-    @character_index = TBS.enemy_char_index(enemy_id)
-    @face_name = TBS.enemy_face(enemy_id)
-    @face_index = TBS.enemy_face_index(enemy_id)
-    @class_name = TBS.enemy_class(enemy_id)
+    @character_name = enemy.chararacter_name
+    @character_index = enemy.chararacter_index
+    @face_name = enemy.face_name
+    @face_index = enemy.face_index
+    @class_name = enemy.class_name
     update_char
   end
 
@@ -3215,10 +3007,8 @@ class Game_Enemy < Game_Battler
   # override method: mmov
   #--------------------------------------------------------------------------
   def mmov
-    move = TBS.enemy_move(@enemy_id)
-    for s_id in @states
-      move += TBS.state_move(s_id)
-    end
+    move = enemy.move
+    move += states.inject(0) {|r,s| r+s.move}
     return [move,0].max
   end
 
@@ -3226,10 +3016,8 @@ class Game_Enemy < Game_Battler
   # override method: move_rule_id
   #--------------------------------------------------------------------------
   def move_rule_id
-    modeModeL = [TBS.enemy_moveMode(@enemy_id)]
-    for s_id in @states
-      modeModeL += [TBS.state_moveMode(s_id)]
-    end
+    modeModeL = [enemy.move_rule_id]
+    modeModeL += states.map{|s| s.move_rule_id}
     return TBS.move_rule_priority(modeModeL)
   end
 
@@ -3254,14 +3042,14 @@ class Game_Enemy < Game_Battler
   # override method: always_hide_view?
   #--------------------------------------------------------------------------
   def always_hide_view?
-    return TBS.always_hide_view(@enemy_id)
+    return enemy.always_hide_view
   end
 
   #--------------------------------------------------------------------------
-  # override method: getRangeWeapon? -> enemies have a weapon range defined in notetags
+  # override method: get_range_weapon? -> enemies have a weapon range defined in notetags
   #--------------------------------------------------------------------------
-  def getRangeWeapon()
-    return TBS.enemy_range(@enemy_id)
+  def get_range_weapon()
+    return enemy.range
   end
 
   #--------------------------------------------------------------------------
@@ -3301,7 +3089,7 @@ class Game_Enemy < Game_Battler
   # override method: remove_on_death?
   #--------------------------------------------------------------------------
   def remove_on_death?
-    return (super || TBS.enemy_disappear(@enemy_id))
+    return (super || enemy.remove_on_death)
   end
 
   #--------------------------------------------------------------------------
@@ -3309,8 +3097,16 @@ class Game_Enemy < Game_Battler
   #--------------------------------------------------------------------------
   def ai_usable_skills
     l1 = enemy.actions.select {|a| action_valid?(a) }.collect{|action| [action.skill_id, action.rating]}
-    l2 = added_skills.collect {|id| [id,TBS.skill_ai_rating(id)] }
+    l2 = added_skills.collect {|id| [id,$data_skills[id].ai_rating] }
     return (l1+l2).sort.collect{|l| [$data_skills[l[0]],l[1]] }.select{|l| usable?(l[0])}
+  end
+
+  #--------------------------------------------------------------------------
+  # new method: skills -> returns a list of all skills (including locked ones)
+  #--------------------------------------------------------------------------
+  def skills
+    l1 = enemy.actions.collect{|action| action.skill_id }
+    return (l1 | added_skills).sort.collect{|id| $data_skills[id]}
   end
 
   #--------------------------------------------------------------------------
@@ -3336,7 +3132,7 @@ class Game_Enemy < Game_Battler
   # new method: description -> returns a description for the database
   #--------------------------------------------------------------------------
   def description
-    return TBS.enemy_description(@enemy_id)
+    return enemy.description
   end
 
   #--------------------------------------------------------------------------
@@ -3354,6 +3150,25 @@ end #Game_Enemy
 #
 #==============================================================================
 
+#==============================================================================
+# TBS 2-D: Game_Unit
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# Handles Game_Unit, Game_Party and Game_Troop
+#==============================================================================
+#  modified classes:
+#
+#  class Game_Unit
+#    new methods: tbs_members, tbs_dead_members, on_tbs_battle_start, on_tbs_battle_end
+#  class Game_Party < Game_Unit
+#    new attribute: neutrals
+#    alias methods: initialize, battle_members
+#    new method: all_candidate_battlers, tbs_add_actor(actor_id, team, setup), tbs_remove_actor(actor_id)
+#  class Game_Troop < Game_Unit
+#    new attributes: neutrals, obstacles
+#    alias methods: clear, exp_total, gold_total, make_drop_items
+#    new methods: all_candidate_battlers, tbs_dead_enemies, add_obstacle(bat), add_extra_battler(bat)
+#==============================================================================
+
 #============================================================================
 # Game_Unit
 #============================================================================
@@ -3365,16 +3180,11 @@ class Game_Unit
     return all_candidate_battlers.select {|mem| mem.tbs_battler}
   end
 
-  #def existing_members
-  #  return (tbs_members.select {|mem| mem.exist? } )
-  #end
-
   #--------------------------------------------------------------------------
   # new method: tbs_dead_members
   #--------------------------------------------------------------------------
   def tbs_dead_members
     return tbs_members.select {|mem| mem.death_state?}
-    #return dead #return (dead.select{|mem| mem.tbs_battler})
   end
 
   #--------------------------------------------------------------------------
@@ -3497,39 +3307,18 @@ class Game_Troop < Game_Unit
     return tbs_exp_total unless SceneManager.scene_is?(Scene_TBS_Battle)
     tbs_dead_enemies.inject(0) {|r, enemy| r += enemy.exp}
   end
+
   alias tbs_gold_total gold_total
   def gold_total
     return tbs_gold_total unless SceneManager.scene_is?(Scene_TBS_Battle)
     tbs_dead_enemies.inject(0) {|r, enemy| r += enemy.gold} * gold_rate
   end
+
   alias tbs_make_drop_items make_drop_items
   def make_drop_items
     return tbs_make_drop_items unless SceneManager.scene_is?(Scene_TBS_Battle)
     tbs_dead_enemies.inject([]) {|r, enemy| r += enemy.make_drop_items }
   end
-
-  #posList is a list of pos ([x,y]) set by priority, if no valid pos is vailable, the unit is not added to the game
-  #def addEnemy(enemy_id, pos_list, team = TBS::TEAMS::TEAM_ENEMIES)
-  #  bat = Game_Enemy.new(0,enemy_id)
-  #  addBattler(bat,pos_list,team)
-  #end
-
-  #def addActor(actor_id, pos_list, team = TBS::TEAMS::TEAM_ACTORS)
-  #  bat = Game_Actor.new(actor_id)
-  #  addBattler(bat,pos_list,team)
-  #end
-
-  #def addBattler(bat, pos_list, team)
-  #  bat.team = team
-  #  @neutrals += [bat]
-  #end
-  #def addObstacle(enemy_id,pos)
-  #  bat = Game_Enemy.new(0,enemy_id)
-  #  bat.team = TBS::TEAMS::TEAM_NEUTRALS
-  #  bat.moveto(pos[0],pos[1])
-  #  bat.set_obstacle
-  #  @obstacles += [bat]
-  #end
 
   #--------------------------------------------------------------------------
   # new method: add_obstacle -> set the battler as an obstacle
@@ -3554,10 +3343,19 @@ end #Game_Troop
 #
 #==============================================================================
 
+#==============================================================================
+# TBS 2-E: TurnWheel
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# Handles TurnWheel class, will choose which units take turn
+#==============================================================================
+#  new class:
+#  class TurnWheel
+#==============================================================================
+
 #BEHAVIOR OF THE TURNWHEEL
 #ON NEXT POINTER: TAKE THE K CONTINGEOUS UNITS THAT SHARE A TURN
-#If someone dies during its turn: disactivate it
-#If someone dies outside its turn: disactivate it, regarless of whether there is a unit right after
+#If someone dies during its turn: deactivate it
+#If someone dies outside its turn: deactivate it, regarless of whether there is a unit right after
 #If the unit should be removed (because dead or anything): remove it but keep
 #If someone is added before its turn: add it then activate it on its turn
 #If someone is added after its turn: add it but activate it only on the next turn
@@ -3590,11 +3388,11 @@ class TurnWheel
   end
 
   #--------------------------------------------------------------------------
-  # new method: computeOrder -> called once at the begining of battle (after the actors are placed)
+  # new method: compute_order -> called once at the begining of battle (after the actors are placed)
   #--------------------------------------------------------------------------
   #should be called after putting every battler inside the list, should be called only at the begining of the battle
   #teams is an array of arrays of battlers sorted by teams, you must assume that the teams are non empty
-  def computeOrder(teams)
+  def compute_order(teams)
     @battlerList = []
     for t in teams
       for b in t
@@ -3641,63 +3439,63 @@ class TurnWheel
         i += 1
       end
     end
-    updateBattlersTurnID
+    update_battlers_turn_id
     #@battlerList = @battlerList #neutrals are dealt with by the battle system
   end
 
   #--------------------------------------------------------------------------
-  # new method: getBattler
+  # new method: get_battler
   #--------------------------------------------------------------------------
-  def getBattler(i)
+  def get_battler(i)
     @battlerList[i]
   end
 
   #--------------------------------------------------------------------------
-  # new method: getTurnIndex
+  # new method: get_turn_index
   #--------------------------------------------------------------------------
-  def getTurnIndex(b)
+  def get_turn_index(b)
     @battlerList.index(b)
   end
 
   #--------------------------------------------------------------------------
-  # new method: battlerShareTurnWith -> asks if b2 can play alongside b1
+  # new method: battlers_share_turn? -> asks if b2 can play alongside b1
   #--------------------------------------------------------------------------
-  def battlerShareTurnWith?(b2,b1)
+  def battlers_share_turn?(b2,b1)
     TBS::GROUPED_TURNS && b2.team == b1.team
   end
 
   #--------------------------------------------------------------------------
-  # new method: nextPointerPos -> given a position p in the turnwheel,
+  # new method: next_pointer_pos -> given a position p in the turnwheel,
   # returns the next position on the turnwheel that represents the first battler
   # that does not share a turn with the battler in posiiton p
   #--------------------------------------------------------------------------
-  def nextPointerPos(p)
-    b1 = getBattler(p)#@battlerList[@pointer]
+  def next_pointer_pos(p)
+    b1 = get_battler(p)#@battlerList[@pointer]
     #p = @pointer
     loop do
       p += 1
-      b2 = getBattler(p)
-      break if (b2.nil? || !battlerShareTurnWith?(b2,b1))
+      b2 = get_battler(p)
+      break if (b2.nil? || !battlers_share_turn?(b2,b1))
     end
     return p #the first "invalid" pos
   end
 
   #--------------------------------------------------------------------------
-  # new method: getActiveBattlers -> the array of battlers that may act according to the turnwheel
+  # new method: active_battlers -> the array of battlers that may act according to the turnwheel
   #--------------------------------------------------------------------------
-  def getActiveBattlers
+  def active_battlers
     @activeBattlers#@battlerList[@pointer,@next_pointer]
   end
 
   #--------------------------------------------------------------------------
   # new method: forward -> updates the list of active battlers
+  # will advance the wheel
+  # return true iff the wheel forwarded, false otherwise (end of the wheel)
   #--------------------------------------------------------------------------
-  #will advance the wheel
-  #return true iff the wheel advanced, return false otherwise (end of the wheel)
   def forward
     if (@next_pointer < @battlerList.size)
       prev_pointer = @next_pointer
-      @next_pointer = nextPointerPos(@next_pointer)#nextPointerPos
+      @next_pointer = next_pointer_pos(@next_pointer)
       #puts sprintf("Array is [%d,%d[",prev_pointer,@next_pointer)
       @activeBattlers = @battlerList[prev_pointer,@next_pointer-prev_pointer]
       return true
@@ -3709,10 +3507,11 @@ class TurnWheel
   end
 
   #--------------------------------------------------------------------------
-  # new method: addBattler
+  # new method: add_battler -> called when a battler is added with
+  # reinforcement mechanic or summon, parent is relevant for ffaeven
+  # when a summon might be added right after its parent
   #--------------------------------------------------------------------------
-  #process when adding reinforcement, parent is relevant for ffaeven when a summon might be added right after its parent
-  def addBattler(b,parent = nil)
+  def add_battler(b,parent = nil)
     b.roll_initiative
     id = parent.nil? ? nil : @battlerList.index(parent)
     i = 0 #position to insert
@@ -3733,44 +3532,46 @@ class TurnWheel
       i = id + 1
     end
     @battlerList.insert(i,b)
-    updateBattlersTurnID
-    onAddBat(i)
+    update_battlers_turn_id
+    on_add_bat(i)
   end
 
   #--------------------------------------------------------------------------
-  # new method: removeBattler
+  # new method: remove_battler -> called when a battler is removed during
+  # combat
   #--------------------------------------------------------------------------
-  #process when a battler is removed during combat
-  def removeBattler(b)
+  def remove_battler(b)
     id = @battlerList.index(b)
     return if id.nil?
     @battlerList.delete_at(id)
     b.turn_id = nil
-    updateBattlersTurnID
-    onRmBat(id)
+    update_battlers_turn_id
+    on_rm_bat(id)
   end
 
   #--------------------------------------------------------------------------
-  # new method: onAddBat
+  # new method: on_add_bat
   #--------------------------------------------------------------------------
   #if the batler added is before me, then I am pushed later
   #if the battler is added where I am, it is fine, I will give it a turn!
-  def onAddBat(pos)
+  def on_add_bat(pos)
     @next_pointer += 1 if @next_pointer > pos
   end
 
   #--------------------------------------------------------------------------
-  # new method: onRmBat
+  # new method: on_rm_bat
   #--------------------------------------------------------------------------
-  #if the battler removed was before me, then I am pulled, if it was my next one or after, then it is not matter
-  def onRmBat(pos)
+  #if the battler removed was before me, then I am pulled, if it was my next
+  #one or after, then it does not matter
+  def on_rm_bat(pos)
     @next_pointer  -= 1 if @next_pointer  > pos
   end
 
   #--------------------------------------------------------------------------
-  # new method: battlerShareTurnWith -> asks if b2 can play alongside b1
+  # new method: update_battlers_turn_id -> refresh the battlers turn id when
+  # the list changes
   #--------------------------------------------------------------------------
-  def updateBattlersTurnID
+  def update_battlers_turn_id
     @battlerList.each_with_index{|bat,i| bat.turn_id = i}
   end
 end #TurnWheel
@@ -3779,6 +3580,15 @@ end #TurnWheel
 #
 # TBS Scene_TBS_Battle
 #
+#==============================================================================
+
+#==============================================================================
+# TBS 2-F: Scene_TBS_Battle
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# The main class of TBS, replace Scene_Battle
+#==============================================================================
+#  new class:
+#  class Scene_TBS_Battle < Scene_Base
 #==============================================================================
 
 #==============================================================================
@@ -3796,7 +3606,10 @@ class Scene_TBS_Battle < Scene_Base
   # * Public instance variables used to find what where the last abilities used,
   # where and by whom?
   #--------------------------------------------------------------------------
-  attr_reader :last_user, :last_item, :last_target, :phase, :turnWheel
+  attr_reader :last_user, :last_item
+  attr_accessor :last_target
+  attr_reader :phase, :turnWheel
+  attr_reader :spriteset
   #--------------------------------------------------------------------------
   # * Start Processing
   #--------------------------------------------------------------------------
@@ -3806,9 +3619,9 @@ class Scene_TBS_Battle < Scene_Base
     @active_battlers = []
     @remove_list = []
     super
+    create_cursor
     map_data = setup_map
     create_battlers(map_data)
-    create_cursor
     create_spriteset
     create_all_windows
     #create_message_window
@@ -3821,10 +3634,13 @@ class Scene_TBS_Battle < Scene_Base
     super
     pre_battle_start
   end
+
+
   #--------------------------------------------------------------------------
   # * Pre-Termination Processing
   #--------------------------------------------------------------------------
   def pre_terminate
+    save_battle_state if save_scene_data?
     super
     if SceneManager.scene_is?(Scene_Map)
       return_to_map
@@ -3837,6 +3653,7 @@ class Scene_TBS_Battle < Scene_Base
   #--------------------------------------------------------------------------
   def terminate
     super
+    SceneManager.snapshot_for_background
     dispose_spriteset
     @info_viewport.dispose
     RPG::ME.stop
@@ -3848,7 +3665,7 @@ class Scene_TBS_Battle < Scene_Base
     super
     return if scene_changing?
     process_event if BattleManager.in_turn?
-    BattleManager.judge_win_loss if @phase == :battle
+    BattleManager.judge_win_loss if @phase == :battle && !scene_changing?
   end
   #--------------------------------------------------------------------------
   # * Update Frame (Basic)
@@ -3863,6 +3680,13 @@ class Scene_TBS_Battle < Scene_Base
     $game_map.update_tbs(false) unless scene_changing? #update of the battlers on the map
     @spriteset.update unless scene_changing?
     update_message_open
+    end_update_basic
+  end
+  #--------------------------------------------------------------------------
+  # * End update basic -> to reset flags
+  #--------------------------------------------------------------------------
+  def end_update_basic
+    @cursor.on_end_update
   end
   #--------------------------------------------------------------------------
   # * Update Frame (for Wait)
@@ -4139,7 +3963,9 @@ class Scene_TBS_Battle < Scene_Base
   # * [Escape] Command
   #--------------------------------------------------------------------------
   def command_escape
-    next_group_turn unless BattleManager.process_escape
+    return if BattleManager.process_escape
+    @party_command_window.close
+    next_group_turn
   end
 
   #--------------------------------------------------------------------------
@@ -4156,12 +3982,12 @@ class Scene_TBS_Battle < Scene_Base
     @actor_command_window.close
     bat = BattleManager.actor
     bat.input.set_attack
-    l = bat.genTgt(bat.getRange(bat.attack_skill_id,:skill))
-    @spriteset.draw_range(l,TBS.spriteType(:attack))
+    l = bat.gen_targets(bat.get_range(bat.attack_skill_id,:skill))
+    @spriteset.draw_range(l,TBS.sprite_type(:attack))
     @cursor.set_skill_data(bat, l)
-    @cursor.moveto(bat.pos.x,bat.pos.y)
+    @cursor.moveto_bat(bat)
     activate_cursor(:attack)
-    @cursor.moveto(bat.pos.x,bat.pos.y)
+    @cursor.moveto_bat(bat)
     @spriteset.update_tile_sprites
   end
   #--------------------------------------------------------------------------
@@ -4181,8 +4007,8 @@ class Scene_TBS_Battle < Scene_Base
     @actor_command_window.close
     bat = BattleManager.actor
     bat.input.set_guard
-    l = bat.genTgt(bat.getRange(bat.guard_skill_id,:skill))
-    @spriteset.draw_range(l,TBS.spriteType(:help_skill))
+    l = bat.gen_targets(bat.get_range(bat.guard_skill_id,:skill))
+    @spriteset.draw_range(l,TBS.sprite_type(:help_skill))
     @cursor.set_skill_data(bat, l)
     @cursor.menu_skill = true #to return to menu when cancelling
     activate_cursor(:skill)
@@ -4194,11 +4020,12 @@ class Scene_TBS_Battle < Scene_Base
   #--------------------------------------------------------------------------
   def command_move
     @actor_command_window.close
-    route, cost = BattleManager.actor.calc_pos_move
+    bat = BattleManager.actor
+    route, cost = bat.calc_pos_move
     l = route.keys
-    @spriteset.draw_range(l,TBS.spriteType(:move))
-    @cursor.set_move_data(BattleManager.actor, l, route, cost)
-    @cursor.moveto(BattleManager.actor.pos.x,BattleManager.actor.pos.y)
+    @spriteset.draw_range(l,TBS.sprite_type(:move))
+    @cursor.set_move_data(bat, l, route, cost)
+    @cursor.moveto_bat(bat)
     activate_cursor(:move)
   end
 
@@ -4277,9 +4104,9 @@ class Scene_TBS_Battle < Scene_Base
     when :item
       bat.input.set_item(item.id)
     end
-    l = bat.genTgt(bat.getRange(item.id,type))
+    l = bat.gen_targets(bat.get_range(item.id,type))
     type2 = item.for_friend? ? :help_skill : :skill
-    @spriteset.draw_range(l,TBS.spriteType(type2))
+    @spriteset.draw_range(l,TBS.sprite_type(type2))
     @cursor.set_skill_data(bat, l)
     #@cursor.moveto(bat.pos.x,bat.pos.y)
     activate_cursor(type)
@@ -4355,10 +4182,8 @@ class Scene_TBS_Battle < Scene_Base
     @subject = subject
     if @subject.current_action
       @subject.current_action.prepare
-      if @subject.current_action.valid? && @subject.current_action.tbs_tgt_valid?
-        #@status_window.open
-        execute_action(true)
-      end
+      execute_action(true) if @subject.current_action.valid? && @subject.current_action.tbs_tgt_valid?
+      #process_action_canceled if @subject.current_action.canceled?
       @subject.remove_current_action
     end
     process_action_end unless @subject.current_action
@@ -4370,16 +4195,9 @@ class Scene_TBS_Battle < Scene_Base
   #--------------------------------------------------------------------------
   def process_action
     return if scene_changing?
-    if !@subject || !@subject.current_action
-      @subject = BattleManager.next_subject
-    end
-    return turn_end unless @subject
     if @subject.current_action
       @subject.current_action.prepare
-      if @subject.current_action.valid?
-        #@status_window.open
-        execute_action
-      end
+      execute_action if @subject.current_action.valid?
       @subject.remove_current_action
     end
     process_action_end unless @subject.current_action
@@ -4402,11 +4220,15 @@ class Scene_TBS_Battle < Scene_Base
   # * Execute Battle Actions
   #--------------------------------------------------------------------------
   def execute_action(tbs = false)
-    @subject.sprite_effect_type = :whiten
+    @subject.sprite_effect_type = :whiten if flash_before_acting?
     @subject.char.set_direction(TBS.dir_towards(@subject.pos,@subject.current_action.tgt_pos)) if tbs
     use_item(tbs)
     @log_window.wait_and_clear
   end
+  #--------------------------------------------------------------------------
+  # flash_before_acting? -> compatibility with YEA Battle engine
+  #--------------------------------------------------------------------------
+  def flash_before_acting?; true; end
   #--------------------------------------------------------------------------
   # * Store Battle Action data
   #--------------------------------------------------------------------------
@@ -4416,8 +4238,51 @@ class Scene_TBS_Battle < Scene_Base
     @last_target = action.tgt_pos
   end
   #--------------------------------------------------------------------------
-  # * Use Skill/Item
+  # * Use Skill/Item -> main item use method, should include compatibility
+  # with Yanfly's battle scripts (you still need the compatibility hub for
+  # them!)
+  # btbs is true if the action was called with a selected position,
+  #        false if called through vanilla event calls
   #--------------------------------------------------------------------------
+  def use_item(btbs = false)
+    store_action_data(@subject,@subject.current_action)
+    item = @subject.current_action.item
+    #prepare item (cost, display)
+    @log_window.display_use_item(@subject, item)
+    @subject.use_item(item)
+    #define targets
+    targets = btbs ? @subject.current_action.tbs_make_final_targets : @subject.current_action.make_targets.compact
+    #pre effects
+    tbs_pre_effects(@subject, item, targets, btbs)
+    #targets.each {|t| t.item_prepare_times(@subject,item) }
+    #display animation
+    (btbs ? show_tbs_animation(targets, item.animation_id, @subject.current_action) : show_animation(targets, item.animation_id)) if show_all_animation?(item)
+    #do item effects to each target (damage + other effects)
+    targets.each do |t|
+      t = random_retargeting(item,t,targets) if $imported["YEA-TargetManager"] && item.for_random?
+      item.repeats.times { invoke_item(t, item) }
+    end
+    #post effects
+    tbs_post_effects(@subject, item, targets, btbs)
+  end
+  #--------------------------------------------------------------------------
+  # tbs_pre_effects -> after item is considered used but before its effects
+  # are applied to each target and before its animation
+  #--------------------------------------------------------------------------
+  def tbs_pre_effects(user, item, targets, btbs)
+    lunatic_object_effect(:before, item, user, user) if $imported["YEA-LunaticObjects"]
+    process_casting_animation if $imported["YEA-CastAnimations"]
+    @subject.current_action.call_additional_tbs_effects(targets) if btbs
+  end
+  #--------------------------------------------------------------------------
+  # tbs_post_effects -> after all item effects are done, check what remains
+  # to be done
+  #--------------------------------------------------------------------------
+  def tbs_post_effects(user, item, targets, btbs)
+    lunatic_object_effect(:after, item, user, user) if $imported["YEA-LunaticObjects"]
+    @subject.tbs_post_item_effects(item,targets) if btbs
+  end
+=begin
   def use_item(tbs = false)
     store_action_data(@subject,@subject.current_action)
     item = @subject.current_action.item
@@ -4425,9 +4290,18 @@ class Scene_TBS_Battle < Scene_Base
     @subject.use_item(item)
     #refresh_status
     targets = tbs ? @subject.current_action.tbs_make_final_targets : @subject.current_action.make_targets.compact
-    @subject.current_action.call_additional_tbs_effects if tbs
+    @subject.current_action.call_additional_tbs_effects(targets) if tbs
+    #targets.each {|t| t.item_prepare_times(@subject,item) }
     tbs ? show_tbs_animation(targets, item.animation_id, @subject.current_action) : show_animation(targets, item.animation_id)
     targets.each {|target| item.repeats.times { invoke_item(target, item) } }
+    @subject.tbs_post_item_effects(item,targets) if tbs
+  end
+=end
+  #--------------------------------------------------------------------------
+  # new method: show_all_animation? -> compatibility with YEA Battle Engine
+  #--------------------------------------------------------------------------
+  def show_all_animation?(item)
+    return true
   end
   #--------------------------------------------------------------------------
   # * Invoke Skill/Item
@@ -4447,7 +4321,6 @@ class Scene_TBS_Battle < Scene_Base
   #--------------------------------------------------------------------------
   def apply_item_effects(target, item)
     target.item_apply(@subject, item)
-    #refresh_status
     @log_window.display_action_results(target, item)
   end
   #--------------------------------------------------------------------------
@@ -4503,13 +4376,18 @@ class Scene_TBS_Battle < Scene_Base
     wait_for_animation
   end
 
+  #--------------------------------------------------------------------------
+  # show_tbs_animation -> called to display an animation when casting abilities
+  # (not forced action by classic event calls)
+  #--------------------------------------------------------------------------
   def show_tbs_animation(targets, animation_id,action)
     return show_animation(targets, animation_id) unless action.item_for_none? || action.item_for_all?
-    animation_id = (@subject.actor? ? @subject.atk_animation_id1 : 1) if animation_id < 0
+    #animation_id = (@subject.actor? ? @subject.atk_animation_id1 : 1) if animation_id < 0
     @spriteset.move_tgt_sprite(action.tgt_pos[0],action.tgt_pos[1])
-    @spriteset.anim_tgt_sprite(animation_id)
-    @log_window.wait
-    wait_for_animation
+    show_animation([@spriteset.tgt_sprite.character],animation_id)
+    #@spriteset.anim_tgt_sprite(animation_id)
+    #@log_window.wait
+    #wait_for_animation
   end
 
   #--------------------------------------------------------------------------
@@ -4531,7 +4409,7 @@ class Scene_TBS_Battle < Scene_Base
   end
   #--------------------------------------------------------------------------
   # * Show Normal Animation
-  #     targets      : Target array
+  #     targets      : Target array, battlers or characters
   #     animation_id : Animation ID
   #     mirror       : Flip horizontal
   #--------------------------------------------------------------------------
@@ -4552,11 +4430,15 @@ class Scene_TBS_Battle < Scene_Base
   #--------------------------------------------------------------------------
 
   #--------------------------------------------------------------------------
-  # setup_map -> sets the battle map amd return data read frpm the map tp setup events and positions
+  # setup_map -> sets the battle map and return data read from the map to setup
+  # events and positions
+  # if saved data, then the current map (stored in @map_id) is already the right
+  # one, loads its data just in case but it might be discarded if phase is late
   #--------------------------------------------------------------------------
   def setup_map
+    return $game_map.setup_tbs_events if retrieve_battle_state
     if TBS::BTEST_MAPID > 0 && $BTEST
-      @map_id = TBS::BTEST_ID
+      @map_id = TBS::BTEST_MAPID
     else
       $game_map.save_map_data
       @map_id = $game_map.map_id
@@ -4570,7 +4452,7 @@ class Scene_TBS_Battle < Scene_Base
   #--------------------------------------------------------------------------
   def determine_battle_map(map_id)
     return map_id if $BTEST
-    map_id = TBS::CALL_ALTERNATE_MAP[map_id] if TBS::CALL_ALTERNATE_MAP[map_id]
+    map_id = $data_mapinfos[map_id].battle_map if $data_mapinfos[map_id].battle_map
     return map_id
   end
 
@@ -4578,7 +4460,7 @@ class Scene_TBS_Battle < Scene_Base
   # return_to_map -> go back to the original map
   #--------------------------------------------------------------------------
   def return_to_map
-    $game_map.retrieve_map = true #will load the data of the map, if the exit map is not the same as the map that called the battle, this should be set to false
+    $game_map.retrieve_map = !TBS::RELOAD_MAP #will load the data of the map, if the exit map is not the same as the map that called the battle, this should be set to false
     $game_map.setup(@map_id)
     $game_player.refresh
     $game_player.center($game_player.x, $game_player.y)
@@ -4613,9 +4495,9 @@ class Scene_TBS_Battle < Scene_Base
   end
 
   #--------------------------------------------------------------------------
-  # disactivate_cursor -> the cursor cannot be moved
+  # deactivate_cursor -> the cursor cannot be moved
   #--------------------------------------------------------------------------
-  def disactivate_cursor
+  def deactivate_cursor
     @spriteset.get_battler_sprites.each{|s| s.stop_team_blink} if $game_system.area_blink
     @cursor.active = false
     #@cursor.menu_skill = false
@@ -4628,8 +4510,8 @@ class Scene_TBS_Battle < Scene_Base
   # update_cursor -> the main update of the cursor
   #--------------------------------------------------------------------------
   def update_cursor
-    return unless @cursor.active
     @cursor.update #moves the cursor and updates its internal data
+    return unless @cursor.active
     @interaction = false #compatibility, a sound will play depending of interaction status
     if @cursor.controllable
       if Input.trigger?(Input::B) #cancel
@@ -4647,14 +4529,37 @@ class Scene_TBS_Battle < Scene_Base
       end
     end
     return unless @cursor.active
-    if @cursor.has_moved #cursor might have been disactivated
-      @spriteset.dispose_range(TBS.spriteType(:move)) if @cursor.mode == :select #when selecting battlers
-      @cursor.battler.nil? ? @small_status_window.hide : @small_status_window.show
-      @small_status_window.battler = @cursor.battler
-      cursor_sprite = @spriteset.get_cursor_sprite
-      @small_status_window.check_relocate(cursor_sprite.x,cursor_sprite.y) unless cursor_sprite.nil?
-    end
+    on_cursor_moved if @cursor.has_moved #cursor might have been deactivated
     update_cursor_place if @cursor.mode == :place
+  end
+
+  #--------------------------------------------------------------------------
+  # on_cursor_moved -> when the cursor is moved
+  #--------------------------------------------------------------------------
+  def on_cursor_moved
+    set_preview_dmg if reset_preview_dmg?
+    @spriteset.dispose_range(TBS.sprite_type(:move)) if @cursor.mode == :select #when selecting battlers
+    update_status_window
+  end
+
+  #--------------------------------------------------------------------------
+  # reset_preview_dmg?
+  #--------------------------------------------------------------------------
+  def reset_preview_dmg?
+    return false unless @cursor.has_moved && [:attack,:skill,:item].include?(@cursor.mode)
+    user = BattleManager.actor
+    item = user.input.item
+    return user.item_preview_tgt_dependant?(item)
+  end
+
+  #--------------------------------------------------------------------------
+  # update_status_window -> update the status display
+  #--------------------------------------------------------------------------
+  def update_status_window
+    @cursor.battler.nil? ? @small_status_window.hide : @small_status_window.show
+    @small_status_window.battler = @cursor.battler
+    cursor_sprite = @spriteset.get_cursor_sprite
+    @small_status_window.check_relocate(cursor_sprite.x,cursor_sprite.y) unless cursor_sprite.nil?
   end
 
   #--------------------------------------------------------------------------
@@ -4698,14 +4603,14 @@ class Scene_TBS_Battle < Scene_Base
     return if @cursor.locked_in_range?
     b = nil
     if @cursor.battler
-      i = @turnWheel.getTurnIndex(@cursor.battler)
-      b = @turnWheel.getBattler((i+1) % @turnWheel.size) unless i.nil?
+      i = @turnWheel.get_turn_index(@cursor.battler)
+      b = @turnWheel.get_battler((i+1) % @turnWheel.size) unless i.nil?
     else
-      b = @turnWheel.getBattler(0)
+      b = @turnWheel.get_battler(0)
     end
     return if b.nil? #should not happen
     Sound.play_cursor
-    @cursor.moveto(b.pos.x,b.pos.y)
+    @cursor.moveto_bat(b)
   end
   #--------------------------------------------------------------------------
   # on_cursor_previous -> when :L is pressed like page_down
@@ -4715,14 +4620,14 @@ class Scene_TBS_Battle < Scene_Base
     return if @cursor.locked_in_range?
     b = nil
     if @cursor.battler
-      i = @turnWheel.getTurnIndex(@cursor.battler)
-      b = @turnWheel.getBattler(i-1) unless i.nil?
+      i = @turnWheel.get_turn_index(@cursor.battler)
+      b = @turnWheel.get_battler(i-1) unless i.nil?
     else
-      b = @turnWheel.getBattler(-1)
+      b = @turnWheel.get_battler(-1)
     end
     return if b.nil? #should not happen
     Sound.play_cursor
-    @cursor.moveto(b.pos.x,b.pos.y)
+    @cursor.moveto_bat(b)
   end
 
   #--------------------------------------------------------------------------
@@ -4742,8 +4647,9 @@ class Scene_TBS_Battle < Scene_Base
       init_battler_list
       add_place_phase_bat(@place_candidates[@place_pointer],@cursor.x,@cursor.y) if @place_pointer
       init_battler_list
+      @cursor.moveto(@cursor.x,@cursor.y)
       if place_pointer_next.nil? || @remaining_places <= 0
-        disactivate_cursor
+        deactivate_cursor
         command_start_battle
       end
       return
@@ -4755,11 +4661,11 @@ class Scene_TBS_Battle < Scene_Base
         Sound.play_ok
         @cursor.select_bat(bat)
         @actor_command_window.setup(bat)
-        disactivate_cursor
+        deactivate_cursor
       else #bat exists and stuff
-        @spriteset.dispose_range(TBS.spriteType(:move))
+        @spriteset.dispose_range(TBS.sprite_type(:move))
         route, cost = bat.calc_pos_move
-        @spriteset.draw_range(route.keys,TBS.spriteType(:move))
+        @spriteset.draw_range(route.keys,TBS.sprite_type(:move))
         Sound.play_buzzer
         #call status menu!
       end
@@ -4773,17 +4679,17 @@ class Scene_TBS_Battle < Scene_Base
       return
     when :move
       return Sound.play_buzzer if @cursor.battler
-      disactivate_cursor
+      deactivate_cursor
       setup_confirm_window(:move)
       return
     when :attack, :skill, :item
       return Sound.play_buzzer unless @cursor.cursor_in_range? && @cursor.origin_bat.input.tbs_tgt_valid?
       mode = @cursor.mode
-      disactivate_cursor
+      deactivate_cursor
       setup_confirm_window(mode)
       return
     end
-    disactivate_cursor
+    deactivate_cursor
     @spriteset.dispose_tile_sprites
   end
 
@@ -4798,9 +4704,10 @@ class Scene_TBS_Battle < Scene_Base
       if @places.include?([@cursor.x,@cursor.y]) && bat
         rm_place_phase_bat(bat)
         init_battler_list
+        @cursor.moveto(@cursor.x,@cursor.y) #refresh internal data
         place_pointer_next unless @place_pointer
       else
-        #disactivate_cursor
+        #deactivate_cursor
         @place_status_window.hide
         @place_command_window.refresh
         open_global_commands
@@ -4829,7 +4736,7 @@ class Scene_TBS_Battle < Scene_Base
         @item_window.activate
       end
     end
-    disactivate_cursor
+    deactivate_cursor
     @spriteset.dispose_tile_sprites
   end
 
@@ -4863,6 +4770,7 @@ class Scene_TBS_Battle < Scene_Base
       return
     when :move
       @cursor.origin_bat.move_through_path(@cursor.path.route,@cursor.path.cost)
+      @cursor.follow_battler(@cursor.origin_bat)
       @confirm_window.close
       @spriteset.dispose_tile_sprites
       wait_for_effect #wait for the move of the battler
@@ -4880,7 +4788,7 @@ class Scene_TBS_Battle < Scene_Base
       @party_command_window.close
       player_group_input_end
     when :start_battle
-      @spriteset.dispose_range(TBS.spriteType(:place))
+      @spriteset.dispose_range(TBS.sprite_type(:place))
       BattleManager.play_battle_bgm
       @place_status_window.hide
       @confirm_window.close
@@ -4966,7 +4874,7 @@ class Scene_TBS_Battle < Scene_Base
   # on_win_window_cancel
   #--------------------------------------------------------------------------
   def open_global_commands
-    disactivate_cursor
+    deactivate_cursor
     @turnorder_window.close
     @wincond_window.close
     global_win = @phase == :setup ? @place_command_window : @party_command_window
@@ -5001,7 +4909,7 @@ class Scene_TBS_Battle < Scene_Base
   end
 
   #--------------------------------------------------------------------------
-  # tactics_all -> all battlers
+  # tactics_all -> all battlers (including obstacles)
   #--------------------------------------------------------------------------
   def tactics_all
     tactics_battlers + obstacles
@@ -5081,18 +4989,33 @@ class Scene_TBS_Battle < Scene_Base
     return @place_pointer
   end
   #--------------------------------------------------------------------------
-  # Main Loop
+  # save_scene_data? -> save the data only if @phase was initialized,
+  # don't save when party is no longer in battle (requires battle has started)
   #--------------------------------------------------------------------------
-  #init
-    #placement_phase
-    #for_each_global_turn:
-    # turn(team) : select action, apply them -> can lead to defeat
-    # check_victory_cond (team is alive etc.) -> break
-    # team = next_team #list of battlers
-    # if team.first? : next_turn (increase count, trigger events, start_turn etc.)
-    # ? check_victory_cond2 (turn count) -> break
-    #exit_battle(result)
-    #delete
+  def save_scene_data?
+    @phase && (@phase != :battle || $game_party.in_battle)
+  end
+  #--------------------------------------------------------------------------
+  # save_battle_state
+  #--------------------------------------------------------------------------
+  def save_battle_state
+    @saved_cursor_pos = @cursor.x, @cursor.y #tmp attribute used only for saved data
+    #list the attributes from this scene that will be saved
+    variables = [:@phase,:@turnWheel,:@tbs_battlers,:@map_id,:@saved_cursor_pos]
+    $game_temp.tbs_scene_data = Hash.new
+    $game_temp.tbs_scene_data[:battledata] = Hash[variables.map { |i| [i, instance_variable_get(i)] }]
+  end
+
+  #--------------------------------------------------------------------------
+  # retrieve_battle_state return true iff there was data to retrieve
+  #--------------------------------------------------------------------------
+  def retrieve_battle_state
+    return false unless $game_temp.save_was_in_tbs?
+    $game_temp.tbs_scene_data[:battledata].each_pair { |key, value| instance_variable_set(key, value) }
+    $game_temp.tbs_scene_data = nil
+    @cursor.moveto(*@saved_cursor_pos)
+    return true
+  end
 
   #--------------------------------------------------------------------------
   # add_battler -> add a battler midgame or during place phase (will not add the bat to the troop/party!)
@@ -5107,7 +5030,7 @@ class Scene_TBS_Battle < Scene_Base
     @spriteset.create_battler_sprite(bat) if @spriteset
     if @phase == :battle && !bat.obstacle?
       @tbs_battlers.push(bat)
-      @turnWheel.addBattler(bat,bat.parent)
+      @turnWheel.add_battler(bat,bat.parent)
       bat.on_battle_start
     end
     return true
@@ -5135,25 +5058,26 @@ class Scene_TBS_Battle < Scene_Base
     if bat.obstacle?
       obstacles.delete(bat)
     elsif @phase == :battle
-      @turnWheel.removeBattler(bat)
+      @turnWheel.remove_battler(bat)
       @tbs_battlers.delete(bat)
       @active_battlers.delete(bat)
       #if battler was somehow active
     end
     @spriteset.dispose_battler_sprite(bat) if @spriteset
     @phase == :battle ? bat.on_battle_end : bat.tbs_leave
-    #@turnWheel.removeBattler(bat) unless bat.obstacle?
+    #@turnWheel.remove_battler(bat) unless bat.obstacle?
   end
 
   #--------------------------------------------------------------------------
   # create_battlers -> setup all the battler (except the actors to place) according to the data of the map
   #--------------------------------------------------------------------------
   def create_battlers(map_tbs_data)
+    return recreate_battlers_from_save(map_tbs_data) if @phase
     #@map_tbs_data = [places_loc, extra_battlers, obstacles, enemy_loc, actor_loc]
     @places_loc, extra_battlers, obstacles_list, enemy_loc, actor_loc = map_tbs_data
     for actor in $game_party.all_candidate_battlers
       #actor.hide
-      actor.tbs_battler = false #disactivate the actor from the battle members unless it is added afterwards
+      actor.tbs_battler = false #deactivate the actor from the battle members unless it is added afterwards
       actor_pos = actor_loc[actor.id]
       actor.tbs_entrance(actor_pos.x, actor_pos.y) unless actor_pos.nil?
     end
@@ -5200,10 +5124,26 @@ class Scene_TBS_Battle < Scene_Base
   end
 
   #--------------------------------------------------------------------------
+  # recreate_battlers_from_save -> case when scene is reloaded mid battle or
+  # from a save file -> will skip battlers initialization
+  #--------------------------------------------------------------------------
+  def recreate_battlers_from_save(map_tbs_data)
+    return if @phase == :battle #skip if already in battle, nothing to load here
+    @places_loc, extra_battlers, obstacles_list, enemy_loc, actor_loc = map_tbs_data
+    placed_bats = $game_map.targeted_battlers(@places_loc[TBS::TEAMS::TEAM_ACTORS])
+    #select actors but don't omit the already placed actors
+    @place_candidates = $game_party.all_members.select{|actor| actor.can_battle? && (!actor.tbs_battler || placed_bats.include?(actor))}
+  end
+
+  #--------------------------------------------------------------------------
   # pre_battle_start -> starts place scene or skip it if no places available
   # or feature disabled
   #--------------------------------------------------------------------------
   def pre_battle_start
+    if @phase == :battle #skip place phase if already in battle
+      @confirm_window.set_mode(:start_battle)
+      return on_confirm_ok
+    end
     @phase = :setup
     #@place_candidates = $game_party.all_members.select{|actor| actor.can_battle? && !actor.tbs_battler}
     @places = @places_loc[TBS::TEAMS::TEAM_ACTORS]
@@ -5213,7 +5153,7 @@ class Scene_TBS_Battle < Scene_Base
     end
     actors_placed = @place_candidates.select{|actor| actor.tbs_battler}.size
     @remaining_places = @places.size - actors_placed
-    @spriteset.draw_range(@places,TBS.spriteType(:place))
+    @spriteset.draw_range(@places,TBS.sprite_type(:place))
     if TBS::PLACE_MUSIC_SWICTH > 0 && !$game_switches[TBS::PLACE_MUSIC_SWICTH]
       BattleManager.play_battle_bgm
     else
@@ -5221,7 +5161,11 @@ class Scene_TBS_Battle < Scene_Base
     end
     @place_pointer = @place_candidates.index{|a| !a.tbs_battler}
     @place_pointer = 0 unless @place_pointer
-    @cursor.moveto(@places[0][0],@places[0][1])
+    if @saved_cursor_pos
+      @saved_cursor_pos = nil
+    else
+      @cursor.moveto(@places[0][0],@places[0][1])
+    end
     if @remaining_places <= 0 || @place_candidates.size - actors_placed <= 0
       @place_pointer = nil if @place_candidates.size - actors_placed <= 0
       return setup_confirm_window(:start_battle)
@@ -5233,6 +5177,10 @@ class Scene_TBS_Battle < Scene_Base
   # battle_start -> once every battler is place, initiate the turnwheel and starts
   #--------------------------------------------------------------------------
   def battle_start
+    if @phase == :battle #skip battle start if already in battle
+      @active_battlers = @turnWheel.active_battlers
+      return command_cursor_select
+    end
     init_battler_list #catch the remaining battlers added before starting combat
     @phase = :battle
     @turnWheel = TurnWheel.new($game_system.turn_mode)
@@ -5241,7 +5189,7 @@ class Scene_TBS_Battle < Scene_Base
       l = tactics_team(team)
       bats += [l] unless l.size == 0
     end
-    @turnWheel.computeOrder(bats)
+    @turnWheel.compute_order(bats)
     puts @turnWheel.battlerList.map{|b| b.name}
     BattleManager.battle_start
     process_event
@@ -5254,7 +5202,14 @@ class Scene_TBS_Battle < Scene_Base
   # remaining_playable_battlers -> can the player still use battlers or should we just skip the turn ?
   #--------------------------------------------------------------------------
   def remaining_playable_battlers?
-    @active_battlers.any?{|b| b.player_controllable? && b.is_active?}
+    !playable_battlers.empty?
+  end
+  #--------------------------------------------------------------------------
+  # remaining_playable_battlers -> lists the battlers that may act on
+  # player's order currently
+  #--------------------------------------------------------------------------
+  def playable_battlers
+    @active_battlers.select{|b| b.player_controllable? && b.is_active?}
   end
 
   #--------------------------------------------------------------------------
@@ -5282,16 +5237,18 @@ class Scene_TBS_Battle < Scene_Base
       on_turn_end(b)
     end
     if @turnWheel.forward
-      @active_battlers = @turnWheel.getActiveBattlers
+      @active_battlers = @turnWheel.active_battlers
       puts sprintf("Turn of %d battlers:",@active_battlers.size)
       puts @active_battlers.map{|bat| bat.name}
       for b in @active_battlers
         b.make_actions
         on_turn_start(b)
       end
-      @cursor.moveto_bat(@active_battlers[0]) if @active_battlers.size > 0
+      bat = playable_battlers.first
+      bat = @active_battlers.first unless bat
+      @cursor.moveto_bat(bat) if bat
       command_cursor_select #will activate cursor iff there are active battlers, else will call ai
-    else
+    else #end of turnwheel cycle
       turn_end #global turn end
     end
   end
@@ -5324,7 +5281,7 @@ class Scene_TBS_Battle < Scene_Base
       on_turn_start(b) #activate all obstacles
     end
     for b in obstacles
-      on_turn_end(b) #disactivate them, simulate parrallel turns just in case
+      on_turn_end(b) #deactivate them, simulate parrallel turns just in case
     end
     #@party_command_window.close
     #@actor_command_window.close
@@ -5345,21 +5302,26 @@ class Scene_TBS_Battle < Scene_Base
   # damage preview in case they are selected
   #--------------------------------------------------------------------------
   def set_preview_dmg
+    old_tgt = @last_target #save the previous target
+    @last_target = POS.new(@cursor.x, @cursor.y) #temporary stores the previous target
     @spriteset.get_battler_sprites.each{|s| s.start_team_blink} if $game_system.area_blink
     user = BattleManager.actor
     item = user.input.item
     tactics_all.each {|bat| bat.prepare_preview_damage(user,item)}
+    @last_target = old_tgt
   end
 end #Scene_TBS_Battle
 
 #==============================================================================
-#
-# TBS BattleManager
-#
+# TBS 2-G: BattleManager
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# Links the BattleManager to TBS logic
 #==============================================================================
+#  modified class:
 #
-# TBS BattleManager
-#
+#  module BattleManager
+#    alias methods: battle_start, battle_end, actor, judge_win_loss
+#    new methods: teams_routed?(scene, team_list), end_battle_cond?
 #==============================================================================
 
 #============================================================================
@@ -5410,13 +5372,6 @@ module BattleManager
     SceneManager.exit if $BTEST
   end
 
-  #def self.turn_start
-  #  @phase = :turn
-  #  clear_actor
-  #  $game_troop.increase_turn
-  #  make_action_orders unless SceneManager.scene_is?(Scene_TBS_Battle)
-  #end
-
   #--------------------------------------------------------------------------
   # alias method: actor -> actor will refer to the selected battler by cursor, may be an enemy
   #--------------------------------------------------------------------------
@@ -5426,45 +5381,96 @@ module BattleManager
   end
 
   #--------------------------------------------------------------------------
-  # new method: teams_routed? -> useful for win/lose conditions
+  # new method: teams_routed? -> check if all teams from the list are
+  # defeated
   #--------------------------------------------------------------------------
   def self.teams_routed?(scene, team_list)
-    for t in team_list
-      return false if scene.team_alive?(t)
-    end
-    return true
+    team_list.all?{|t| !scene.team_alive?(t)}
   end
 
   #--------------------------------------------------------------------------
-  # new method: end_battle_cond? -> useful for patches with Yanfly Battle Engine
+  # new method: tbs_defeat? -> scene is Scene_TBS_Battle
   #--------------------------------------------------------------------------
-  def self.end_battle_cond?
+  def self.tbs_defeat?(scene)
+    teams_routed?(scene,TBS::TEAMS::TEAMS_TO_SURVIVE)
+  end
+
+  #--------------------------------------------------------------------------
+  # new method: tbs_victory? -> scene is Scene_TBS_Battle
+  #--------------------------------------------------------------------------
+  def self.tbs_victory?(scene)
+    teams_routed?(scene,TBS::TEAMS::TEAMS_TO_ROUT)
+  end
+
+  #--------------------------------------------------------------------------
+  # new method: end_battle_status -> check what is the state of the battle
+  # return value is:
+  #   0   if abort
+  #   1   if victory (opposite teams routed)
+  #  -1   if defeat (self team routed)
+  #false  if battle is not over/not in TBS battle
+  #--------------------------------------------------------------------------
+  def self.end_battle_status
     return false unless SceneManager.scene_is?(Scene_TBS_Battle)
     scene = SceneManager.scene
     if @phase
-      return true   if scene.tactics_party.empty?
-      return true   if teams_routed?(scene,TBS::TEAMS::TEAMS_TO_SURVIVE)
-      return true   if teams_routed?(scene,TBS::TEAMS::TEAMS_TO_ROUT)
-      return true   if aborting?
+      return 0   if scene.tactics_party.empty?
+      return -1  if tbs_defeat?(scene)
+      return 1   if tbs_victory?(scene)
+      return 0   if aborting?
     end
     return false
   end
 
   #--------------------------------------------------------------------------
-  # alias method: judge_win_loss -> now ends the battle when the selected teams are routed one way or another
+  # alias method: judge_win_loss -> now ends the battle when the selected
+  # teams are routed one way or another
+  # checking is disabled if $game_system.custom_battle_end is true
   #--------------------------------------------------------------------------
   def self.judge_win_loss
     return tbs_judge unless SceneManager.scene_is?(Scene_TBS_Battle)
-    scene = SceneManager.scene
-    if @phase
-      return process_abort   if scene.tactics_party.empty?
-      return process_defeat  if teams_routed?(scene,TBS::TEAMS::TEAMS_TO_SURVIVE) #$game_party.all_dead?
-      return process_victory if teams_routed?(scene,TBS::TEAMS::TEAMS_TO_ROUT)
-      return process_abort   if aborting?
+    return false if $game_system.custom_battle_end
+    case end_battle_status
+      when 0; return process_abort
+      when 1; return process_victory
+      when -1; return process_defeat
     end
     return false
   end
+  #--------------------------------------------------------------------------
+  # second alias: judge_win_loss -> handles recursive judge_win_loss calls
+  # TODO: fix the recursive calls: see Event Triggers 2 + Positionning when
+  # killing last actor + pushing them
+  #--------------------------------------------------------------------------
+  class << self; alias tbs_judge_wrapped judge_win_loss; end
+  def self.judge_win_loss
+    return false if @judging
+    @judging = true
+    tbs_judge_wrapped
+    @judging = false
+  end
 end #BattleManager
+
+#==============================================================================
+# TBS 2-H: Positionning
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# Handle TBS specific properties like moving and casting abilities
+#==============================================================================
+#  new classes:
+#
+#  class POS
+#     stores x,y for math operations
+#  class MoveRule
+#     stores move cost data and restrictions, used in calc_pos_move
+#  class CastRange
+#     used to generate range of spells and area of effects
+#  class SpellRange
+#     stores 2 CastRange, one for the range of the spell, the other for the area of effect.
+#  class TBS_Path
+#     updates the path when adding directions during move command
+#  class Game_TBS_Step_Character < Game_Character
+#     handles the path displayed when the player tries to build a path
+#==============================================================================
 
 #==============================================================================
 #
@@ -5488,11 +5494,23 @@ class POS
     @x = x
     @y = y
   end
+  #--------------------------------------------------------------------------
+  # basic operators: + - * / -pos ==
+  #--------------------------------------------------------------------------
   def +(obj)
     return POS.new(@x + obj[0], @y + obj[1])
   end
   def -(obj)
     return POS.new(@x - obj[0], @y - obj[1])
+  end
+  def *(k)
+    return POS.new(@x*k, @y*k)
+  end
+  def /(k)
+    return POS.new(@x/k, @y/k)
+  end
+  def -@
+    return POS.new(-@x,-@y)
   end
   def ==(obj)
     return (@x == obj[0] && @y == obj[1])
@@ -5511,13 +5529,19 @@ class POS
     return @x.abs + @y.abs
   end
   #--------------------------------------------------------------------------
-  # a 2-dimension distance in absolute value in each axis
+  # euclidian_norm -> the length of the vector as sqrt(x^2 + y^2)
+  #--------------------------------------------------------------------------
+  def euclidian_norm
+    return Math.sqrt(@x*@x + @y*@y)
+  end
+  #--------------------------------------------------------------------------
+  # local_dist -> a 2-dimension distance in absolute value in each axis
   #--------------------------------------------------------------------------
   def local_dist(other)
     return POS.new(abs(@x - other.x), abs(@y - other.y))
   end
   #--------------------------------------------------------------------------
-  # a 2-dimension distance in each axis with respect to the map
+  # map_dist -> a 2-dimension distance in each axis with respect to the map
   #--------------------------------------------------------------------------
   def map_dist(other)
     dx = @x - other[0]
@@ -5527,25 +5551,31 @@ class POS
     return dx,dy
   end
   #--------------------------------------------------------------------------
-  # euclidian_norm -> the distance of the vector as sqrt(x^2 + y^2)
+  # moveto -> teleports the position to x,y
   #--------------------------------------------------------------------------
-  def euclidian_norm
-    return Math.sqrt(@x*@x + @y*@y)
-  end
-
   def moveto(x,y)
     @x = x
     @y = y
   end
-
+  #--------------------------------------------------------------------------
+  # [] -> to access x,y with pos[0] and pos[1]
+  #--------------------------------------------------------------------------
   def [](key)
     return @x if key == 0
     return @y
   end
-
-  #def coordinates
-  #  return x,y
-  #end
+  #--------------------------------------------------------------------------
+  # to_a -> array conversion
+  #--------------------------------------------------------------------------
+  def to_a
+    [@x,@y]
+  end
+  #--------------------------------------------------------------------------
+  # to_s -> string conversion
+  #--------------------------------------------------------------------------
+  def to_s
+    sprintf("(%s,%s)",@x.to_s,@y.to_s)
+  end
 
   #--------------------------------------------------------------------------
   # signs -> returns a [sx,sy] array with sx the sign of x and sy the sign of y, 0 if x/y is 0
@@ -5557,7 +5587,7 @@ class POS
     b = 0 if @y == 0
     return a,b
   end
-end
+end #POS
 
 #==============================================================================
 #
@@ -5672,34 +5702,34 @@ module TBS
 
 
   #--------------------------------------------------------------------------
-  # new method: getTargetsList -> returns an array of targetable postitions by a spellRng when casting it from src
+  # new method: get_targets -> returns an array of targetable postitions by a spellRng when casting it from src
   #--------------------------------------------------------------------------
   #given a bat, a spellRng it aims to cast, its src postition,
   #returns a list of position that may be targeted by bat
   #this method is used by players and ais
-  def self.getTargetsList(bat,src,spellRng)
+  def self.get_targets(bat,src,spellRng)
     l = spellRng.range.genTargets(src)
     return l.select{|pos| tgt_valid?(bat,src,pos,spellRng.range)}
     #return l2.map{|pos| pos.coordinates}
   end
 
   #--------------------------------------------------------------------------
-  # new method: getSourcesList -> returns an array of sources postitions that may target the tgt with the given spellRng
+  # new method: get_sources -> returns an array of sources postitions that may target the tgt with the given spellRng
   #--------------------------------------------------------------------------
   #given a bat, a spellRng it aims to cast, and a tgt it aims to target,
   #returns a list of position that may be sources for bat
   #this method is used by ais
-  def self.getSourcesList(bat,tgt,spellRng)
+  def self.get_sources(bat,tgt,spellRng)
     l = spellRng.range.genTargets(tgt)
     return l.select{|pos| $game_map.valid?(pos.x,pos.y) && tgt_valid?(bat,pos,tgt,spellRng.range)}
     #return l2.map{|pos| pos.coordinates}
   end
 
   #--------------------------------------------------------------------------
-  # new method: getArea -> returns an array of cells in the area of a spell cast on tgt from src
+  # new method: get_area -> returns an array of cells in the area of a spell cast on tgt from src
   #--------------------------------------------------------------------------
-  def self.getArea(bat,src,tgt,spellRng)
-    l = spellRng.area.genArea(src,tgt)
+  def self.get_area(bat,src,tgt,spellRng)
+    l = spellRng.area.gen_area(src,tgt)
     return l.select{|pos| tgt_valid?(bat,tgt,pos,spellRng.area)}
   end
 
@@ -5786,6 +5816,21 @@ module TBS
   end
 
   #--------------------------------------------------------------------------
+  # new method: dir_right (turn 90 degrees to the right)
+  # 2 -> 4 -> 8 -> 6 -> 2 && 1 -> 7 -> 9 -> 3 -> 1
+  #--------------------------------------------------------------------------
+  def self.dir_right(d)
+    (d*7) % 10
+  end
+  #--------------------------------------------------------------------------
+  # new method: dir_left (turn 90 degrees to the left)
+  # 2 -> 6 -> 8 -> 4 -> 2 && 1 -> 3 -> 9 -> 7 -> 1
+  #--------------------------------------------------------------------------
+  def self.dir_left(d)
+    (d*3) % 10
+  end
+
+  #--------------------------------------------------------------------------
   # new method: crossed_positions -> return an array of crossed cells between a source and a target positions with a straight line
   #--------------------------------------------------------------------------
   #return a list of position crossed from source to target (will not contain the source pos but will contain the target)
@@ -5813,7 +5858,7 @@ module TBS
     lx = dx < 0 ? -1 : 1
     ly = dy < 0 ? -1 : 1
     #diagonal case
-    if dx.abs() == dy.abs()
+    if dx.abs == dy.abs
       d = TBS.delta_to_direction(lx,ly)
       while sx != tx
         sx += lx
@@ -5828,7 +5873,7 @@ module TBS
       a = 100000000 #a big enough integer such that y never changes
       b = 0 #the value does not matter
     else
-      a = dy.to_f()/dx.to_f()
+      a = dy.to_f/dx.to_f
       b = sy - a*sx
     end
     xrange = crossed_range(sx,tx)
@@ -5845,7 +5890,7 @@ module TBS
           y2 = yrange[iy]
           x2 = (y2 - b)/a
           #checks if x2 is closer to x than x1
-          if (sx-x1).abs() > (sx-x2).abs()
+          if (sx-x1).abs > (sx-x2).abs
             x1, y1 = x2, y2
             iy += 1
             d = TBS.delta_to_direction(0,ly)
@@ -5867,8 +5912,8 @@ module TBS
         d = TBS.delta_to_direction(0,ly)
       end
 
-      x1 = x1.round()
-      y1 = y1.round()
+      x1 = x1.round
+      y1 = y1.round
       if x != x1 || y != y1
         pos = POS.new(x1,y1) #only an integer matters
         x,y = x1,y1
@@ -5878,8 +5923,39 @@ module TBS
     end #while
     return l, dirs
   end #crossed_positions
-end #TBS
 
+  #============================================================================
+  # TBS::MATH module -> handle pure maths related to trigonometry and
+  # probabilities (used by Projectiles and Positionning)
+  #============================================================================
+  module MATH
+    #[-pi,pi] -> [-180,180]
+    def self.rad_to_degree(rad)
+      return rad * 180.to_f / Math::PI
+    end
+    #[0,360] -> [0,2pi]
+    def self.degree_to_rad(degree)
+      return degree *  Math::PI / 180.to_f
+    end
+
+    #return an angle in degree for sprite calculations
+    def self.angle_from(x,y)
+      rad_to_degree(rad_angle_from(x,y))
+    end
+
+    #return an angle in rad for sprite calculations
+    def self.rad_angle_from(x,y)
+      return 0 if x == y && y == 0
+      Math.atan2(-y,x)
+    end
+
+    #return an x,y position (normalized value) from an angle in degree
+    def self.angle_to_xy(angle)
+      rad = degree_to_rad(angle)
+      return Math.cos(rad), -Math.sin(rad)
+    end
+  end #MATH
+end #TBS
 
 #============================================================================
 # CastRange -> stores 4 values min_range, max_range, line_of_sight, range_type
@@ -5981,10 +6057,10 @@ class CastRange
   end
 
   #--------------------------------------------------------------------------
-  # genArea -> returns an array of cells that are inside the area of a spell cast on tgt from src
+  # gen_area -> returns an array of cells that are inside the area of a spell cast on tgt from src
   #--------------------------------------------------------------------------
   #given an src (caster) and tgt POS, return a list of cells that are touched by an area
-  def genArea(src,tgt)
+  def gen_area(src,tgt)
     return genTargets(tgt) unless [:perpendicular,:line].include?(@range_type)
     minRange, maxRange = _minRange, _maxRange
     l = []
@@ -6141,7 +6217,7 @@ class TBS_Path
     @bat = bat
     @m_r = MoveRule.new(bat.move_rule_id)
     @first_dir = bat.char.direction
-    #@src = Pos.new(bat.char.x,bat.char.y)
+    #@src = POS.new(bat.char.x,bat.char.y)
     @route = []
     for d in r
       @route.push(d)
@@ -6210,7 +6286,7 @@ class TBS_Path
   # char_list -> generates a list of Game_TBS_Step_Character for display purpose
   #--------------------------------------------------------------------------
   def char_list
-    pos = @bat.pos#Pos.new(bat.char.x,bat.char.y)
+    pos = @bat.pos#POS.new(bat.char.x,bat.char.y)
     l = []
     road = [@first_dir] + @route
     for i in 0...road.size#-1
@@ -6277,10 +6353,29 @@ end
 #
 #==============================================================================
 
+#==============================================================================
+# TBS 2-I: Map
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# Deals with map properties with TBS
+#==============================================================================
+#   modified class:
+#
+#   class Game_Map
+#     new attributes: retrieve_map
+#     alias methods: setup_events, setup, update_events
+#     new methods: setup_old_events, save_map_data, tbs_setup, update_tbs, update_battlers
+#                  setup_tbs_events, tbs_events, battle_event_at?(x,y), in_range?(posList, x1,y1)
+#                  targeted_battlers(posList), occupied_by?(x, y), cost_move(move_rule, x,y,d)
+#                  obstacle_dir?(prev_pos,pos,d), can_see?(bat,source,target),
+#                  battle_events_at(x,y), battle_events_in(posList)
+#==============================================================================
+
 #============================================================================
 # Game_Map
 #============================================================================
 class Game_Map
+
+#save of the events for reloading the map, thanks to Kyonides for this!
   #--------------------------------------------------------------------------
   # public instance variables
   #--------------------------------------------------------------------------
@@ -6311,16 +6406,7 @@ class Game_Map
     @old_events = @events.dup
     @old_common_events = @common_events.dup
   end
-
-  #-------------------------------------------------------------------------
-  # alias method: initialize -> refresh the @extras and @battle_evemts
-  #-------------------------------------------------------------------------
-  #alias tbs_map_init initialize
-  #def initialize()
-  #  @extras = {}
-  #  @battle_events = {}
-  #  tbs_map_init
-  #end
+#end of Kyonides code
 
   #-------------------------------------------------------------------------
   # alias method: setup -> refresh the @extras and @battle_events
@@ -6369,8 +6455,6 @@ class Game_Map
   #-------------------------------------------------------------------------
   # new method: setup_tbs_events -> reads all events and store them if they are relevant for TBS, the rest will be hidden
   #-------------------------------------------------------------------------
-  TBS_event_names = TBS::EVENT_NAMES::LIST
-  TBS_comments_names = TBS::EVENT_COMMENTS::LIST_FIX + TBS::EVENT_COMMENTS::LIST_PLACE
   def setup_tbs_events
     obstacles = []
     enemy_loc = {}
@@ -6378,68 +6462,43 @@ class Game_Map
     #neu_loc = {}
     extra_battlers = []
     places_loc = []
-    for i in 0...TBS::TEAMS.nb_teams
-      places_loc.push([])
-    end
-    for j in @events.keys
-      event = @events[j]
-      if event.name #!event.name.nil? #read the event name
-        for i in 0...TBS_event_names.size
-          type = TBS_event_names[i]
-          if event.name.downcase.include?(type)
-            case i
-            when 0 #extra
-              @extras[j] = event
-            when 1 #battle_events
-              #$game_system.battle_events
-              @battle_events[j] = event
-            end
-          end
-        end
+    TBS::TEAMS.nb_teams.times{ places_loc.push([]) }
+    @events.each_pair do |j,event|
+      case event.name
+      when TBS::REGEXP::EVENT_NAMES::EXTRA
+        @extras[j] = event
+      when TBS::REGEXP::EVENT_NAMES::TBS_EVENT
+        @battle_events[j] = event
       end
-      #now, check the comments
-      next if event.list == nil
-      for i in 0...event.list.size
-        if event.list[i].code == 108 #comment
-          txt = event.list[i].parameters[0] #"LIGHT 1" & co
-          res = txt.split
-          comment_id = TBS_comments_names.index(res[0])
-          next if comment_id.nil?
-          id = team_id = nil
-          id = res[1].to_i unless res[1].nil?
-          team_id = res[2].to_i unless res[2].nil?
-          case comment_id
-          when 0 #obstacle
-            bat = Game_Enemy.new(0,id)
-            bat.moveto(event.x, event.y)
-            obstacles.push(bat)
-          when 1 #actor
-            actor_loc[id] = event
-          when 2 #enemy
-            enemy_loc[id] = event
-          when 3 #spawn_actor
-            bat = Game_Actor.new(id)
-            bat.team = team_id
-            bat.moveto(event.x, event.y)
-            extra_battlers.push(bat)
-          when 4 #spawn_enemy
-            bat = Game_Enemy.new(0,id)
-            bat.team = team_id
-            bat.moveto(event.x, event.y)
-            extra_battlers.push(bat)
-          when 5 #enemy_place
-            places_loc[TBS::TEAMS::TEAM_ENEMIES].push([event.x, event.y])
-          when 6 #party_place
-            places_loc[TBS::TEAMS::TEAM_ACTORS].push([event.x, event.y])
-          when 7 #team_place
-            places_loc[id].push([event.x, event.y])
-          end
-          #a comment was used for tbs, no need to check further comments,
-          #this guarantees the unicity of position of each element of the tables,
-          #so this also avoid computation checking :3
-          break
+      #now the comments:
+      event.note.split(/[\r\n]+/).each { |line|
+        case line
+        when TBS::REGEXP::EVENT_COMMENTS::OBSTACLE
+          bat = Game_Enemy.new(0,$1.to_i)
+          bat.moveto(event.x, event.y)
+          obstacles.push(bat)
+        when TBS::REGEXP::EVENT_COMMENTS::ACTOR
+          actor_loc[$1.to_i] = event
+        when TBS::REGEXP::EVENT_COMMENTS::ENEMY
+          enemy_loc[$1.to_i] = event
+        when TBS::REGEXP::EVENT_COMMENTS::SPAWN_ACTOR
+          bat = Game_Actor.new($1.to_i)
+          bat.team = $2.to_i
+          bat.moveto(event.x, event.y)
+          extra_battlers.push(bat)
+        when TBS::REGEXP::EVENT_COMMENTS::SPAWN_ENEMY
+          bat = Game_Enemy.new(0,$1.to_i)
+          bat.team = $2.to_i
+          bat.moveto(event.x, event.y)
+          extra_battlers.push(bat)
+        when TBS::REGEXP::EVENT_COMMENTS::PLACE_ENEMY
+          places_loc[TBS::TEAMS::TEAM_ENEMIES].push([event.x, event.y])
+        when TBS::REGEXP::EVENT_COMMENTS::PLACE_PARTY
+          places_loc[TBS::TEAMS::TEAM_ACTORS].push([event.x, event.y])
+        when TBS::REGEXP::EVENT_COMMENTS::PLACE_TEAM
+          places_loc[$1.to_i].push([event.x, event.y])
         end
-      end
+      } # event.note.split
     end
     #list of lists of pos for each team,
     #list of battlers already placed, need to check them and add them at the right place
@@ -6460,10 +6519,11 @@ class Game_Map
   # new method: battle_event_at? -> is there a battle_event at x,y?
   #-------------------------------------------------------------------------
   def battle_event_at?(x,y)
-    for event in @battle_events.values
-      return event if event.x == x && event.y == y
-    end
-    return nil
+    @battle_events.values.find{|e| e.x == x && e.y == y}
+    #for event in @battle_events.values
+    #  return event if event.x == x && event.y == y
+    #end
+    #return nil
   end
 
   #-------------------------------------------------------------------------
@@ -6495,15 +6555,30 @@ class Game_Map
   end
 
   #--------------------------------------------------------------------------
+  # new method: battlers_at ->  return all battler occupying this position
+  # empty array otherwise
+  #--------------------------------------------------------------------------
+  def battlers_at(x, y)
+    return [] unless SceneManager.scene_is?(Scene_TBS_Battle)
+    return SceneManager.scene.tactics_all.select{|battler| battler.pos.x == x && battler.pos.y == y}
+  end
+
+  #--------------------------------------------------------------------------
+  # new method: battler_at ->  returns the first battler occupying this position
+  # nil if no such battler exists
+  #--------------------------------------------------------------------------
+  def battler_at(x, y)
+    return nil unless SceneManager.scene_is?(Scene_TBS_Battle)
+    return SceneManager.scene.tactics_all.find{|battler| battler.pos.x == x && battler.pos.y == y}
+    #battlers_at(x,y).first #same but slower to compute in theory
+  end
+
+  #--------------------------------------------------------------------------
   # new method: occupied_by? ->  return a battler that occupies the x,y position, nil otherwise
   #--------------------------------------------------------------------------
   def occupied_by?(x, y)
     return nil unless SceneManager.scene_is?(Scene_TBS_Battle)
     return SceneManager.scene.tactics_all.find{|battler| battler.pos.x == x && battler.pos.y == y}
-    #for battler in SceneManager.scene.tactics_all
-    #  return battler if battler.pos.x == x && battler.pos.y == y
-    #end
-    #return nil #not occupied?
   end
 
   #--------------------------------------------------------------------------
@@ -6550,8 +6625,10 @@ class Game_Map
     for i in 1...l.size
       return false if obstacle_dir?(l[i-1],l[i],dirs[i-1])
       if TBS::BATTLER_HIDE
-        bat2 = occupied_by?(l[i].x,l[i].y)
-        return false unless (bat2.nil? || !bat2.hide_view?(bat))
+        batlist = battlers_at(*l[i])
+        return false if batlist.any?{|b| b.hide_view?(bat)}
+        #bat2 = battler_at(l[i].x,l[i].y)
+        #return false unless (bat2.nil? || !bat2.hide_view?(bat))
       end
     end
     return true
@@ -6564,6 +6641,19 @@ end #Game_Map
 #
 #==============================================================================
 
+#==============================================================================
+# TBS 2-J: Cursors
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# Deals with cursors navigating the tbs map
+#==============================================================================
+#   new classes:
+#
+#   class TBS_Cursor
+#      deals with cursor position during TBS
+#   class Direction_Cursor < Sprite_Base
+#      the WAIT DIRECTION image that appears over battlers at the end of their turn
+#==============================================================================
+
 #============================================================================
 # TBS_Cursor -> Deals with cursor position during TBS
 #============================================================================
@@ -6573,7 +6663,7 @@ class TBS_Cursor
   #--------------------------------------------------------------------------
   #active determines if the cursor can me controlled
   #mode is a value in [:place,:select,:move,:attack,:skill,:item], it defines the cursor purpose
-  attr_accessor :active, :mode, :controllable
+  attr_accessor :active, :mode, :controllable, :speed
   attr_accessor :menu_skill #boolean controlled by scene that will return to the actor menu when cancelling the cursor action, relevant for guard skill and future single menu skills
   #has_moved is used for informing the rest to update themselves
   #origin_bat is the selected battler by the cursor (except in :select mode)
@@ -6586,6 +6676,7 @@ class TBS_Cursor
   def initialize
     @active = false
     @pos = POS.new(0,0)
+    @real_pos = @pos.dup
     @range = [] #list of x,y where the cursor may go, relevant for move situations
     @mode = nil                      #a value in [:place, :select, :move, :item, :skill, :attack]
     @battler = nil                   #battler under the cursor, nil if no such battler
@@ -6596,6 +6687,8 @@ class TBS_Cursor
     @route_data = {}
     @cost_data = {}
     @area = [] #skill, help_skill, used to display area
+    @default_speed = TBS::CURSOR_SPEED #in cells per frames
+    @speed = POS.new(@default_speed,@default_speed) #in cells per frame in each dimension, can be updated
   end
 
   #--------------------------------------------------------------------------
@@ -6606,17 +6699,75 @@ class TBS_Cursor
   end
 
   #--------------------------------------------------------------------------
-  # x,y to get the cursor position
+  # x,y to get the cursor logical position
   #--------------------------------------------------------------------------
   def x; @pos.x; end
   def y; @pos.y; end
 
   #--------------------------------------------------------------------------
+  # follow_battler -> locks the cursor position to a battler
+  #--------------------------------------------------------------------------
+  def follow_battler(bat)
+    @follow_bat = bat
+  end
+  #--------------------------------------------------------------------------
+  # unfollow_battler -> unlocks cursor's position from the battler
+  #--------------------------------------------------------------------------
+  def unfollow_battler
+    @follow_bat = nil
+  end
+  #--------------------------------------------------------------------------
+  # update_follow
+  #--------------------------------------------------------------------------
+  def update_follow
+    @pos = @follow_bat.pos.dup
+  end
+
+  #--------------------------------------------------------------------------
+  # real_x,real_y to get the cursor graphic position
+  #--------------------------------------------------------------------------
+  def real_x; @real_pos.x; end
+  def real_y; @real_pos.y; end
+
+  #--------------------------------------------------------------------------
+  # moving? -> is the cursor graphically moving?
+  #--------------------------------------------------------------------------
+  def moving?
+    @real_pos != @pos
+  end
+
+  #--------------------------------------------------------------------------
+  # set_speed -> sets the cursor speed when sliding, dx, dy are relative
+  # distances, in x,y coordinates, t is a number of frames, nil or 0 if no frames
+  #--------------------------------------------------------------------------
+  def set_speed(dx,dy,t)
+    if t && t > 0
+      @speed = POS.new(dx.abs,dy.abs) / t.to_f
+      puts sprintf("Set speed to %f,%f", @speed.x, @speed.y)
+    else
+      @speed.x = @speed.y = @default_speed
+    end
+  end
+
+  #--------------------------------------------------------------------------
+  # update_move -> deals with cursor sliding
+  #--------------------------------------------------------------------------
+  def update_move
+    @real_pos.x = [real_x - @speed.x, x].max if x < real_x
+    @real_pos.x = [real_x + @speed.x, x].min if x > real_x
+    @real_pos.y = [real_y - @speed.y, y].max if y < real_y
+    @real_pos.y = [real_y + @speed.y, y].min if y > real_y
+    return false
+  end
+
+  #--------------------------------------------------------------------------
   # update -> when the cursor is active, it will respond to the keyboard arrows to move
   #--------------------------------------------------------------------------
   def update
+    update_follow if @follow_bat
+    return update_move if moving?
     return false unless @active && @controllable #|| $game_troop.interpreter.running? #|| $game_map.interpreter.running?
-    @has_moved = false
+    unfollow_battler
     nu_x, nu_y = x, y
     if Input.repeat?(Input::RIGHT)
         nu_x += 1
@@ -6629,7 +6780,7 @@ class TBS_Cursor
     end
     #check if moved and not moved outside the map
     if (nu_x != x || nu_y != y) && $game_map.valid?(nu_x, nu_y) && (!locked_in_range? || in_range?(@range,nu_x,nu_y))
-      moveto( nu_x, nu_y)
+      TBS::SLIDE_CURSOR ? slideto(nu_x, nu_y) : moveto(nu_x, nu_y)
       Sound.play_cursor
       return true
     end
@@ -6637,13 +6788,31 @@ class TBS_Cursor
   end
 
   #--------------------------------------------------------------------------
-  # moveto -> moves the cursor to x,y
+  # update -> at the end of each frame if the cursor was active (display was updated too)
+  #--------------------------------------------------------------------------
+  def on_end_update
+    #return false unless @active && @controllable
+    @has_moved = @area_changed = false
+  end
+
+  #--------------------------------------------------------------------------
+  # moveto -> instantly moves the cursor to x,y
   #--------------------------------------------------------------------------
   def moveto(x,y)
+    @real_pos.moveto(x,y)
+    slideto(x,y)
+  end
+
+  #--------------------------------------------------------------------------
+  # slideto -> moves the cursor target to x,y in t frames
+  # if t is nil then use the default speed
+  #--------------------------------------------------------------------------
+  def slideto(x,y,t=nil)
     @has_moved = true
     dx,dy = x-@pos.x,y-@pos.y
     @pos.moveto(x,y)
-    @battler = $game_map.occupied_by?(x,y)
+    @battler = $game_map.battler_at(x,y)
+    set_speed(x-real_x, x-real_y, t)
     if @mode == :move
       if dx.abs + dy.abs == 1
         d = TBS.delta_to_direction(dx,dy)
@@ -6656,6 +6825,7 @@ class TBS_Cursor
       end
     elsif requires_area?
       @area = cursor_in_range? ? @origin_bat.input.set_target(@pos) : []
+      @area_changed = true
     end
   end
 
@@ -6681,11 +6851,11 @@ class TBS_Cursor
   end
 
   #--------------------------------------------------------------------------
-  # at? -> is the cursor at pos2?
+  # area_changed?
   #--------------------------------------------------------------------------
-  #def at?(pos2)
-  #  return @pos == pos2
-  #end
+  def area_changed?
+    @area_changed
+  end
 
   #--------------------------------------------------------------------------
   # set_move_data -> when setting the :move mode, storing the route and cost
@@ -6856,9 +7026,23 @@ class Direction_Cursor < Sprite_Base
 end #Direction_Cursor
 
 #==============================================================================
+# TBS 2-K: Game_Action
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# Valdiidity of actions
+#==============================================================================
+#   modified classes:
+#   Game_BaseItem
+#     new attribute: item_id
 #
-# TBS Game_Action
-#
+#   class Game_Action
+#     new attributes: tgt_pos
+#     new attributes (private): tgt_area, tgt_property
+#     alias methods: set_item, set_skill, clear
+#     new methods: set_target(pos), get_targeted_rel, tbs_make_target_pos,
+#                  tbs_make_targets(area), tbs_make_final_targets(area),
+#                  property_valid?(property), get_tgt_property, item_for_none?, item_for_all?,
+#                  tbs_tgt_valid?, random_target, call_additional_tbs_effects, tgt_empty?,
+#                  tgt_filled?,tgt_blocking_event?,tgt_ground?,tgt_water?
 #==============================================================================
 
 #Target mode:
@@ -6868,8 +7052,6 @@ end #Direction_Cursor
 #k-random enemies -> take k-random targets in area
 #1-all dead allies -> same behaviour as non-dead but restricted to dead units
 #user -> same as 1-all allies, you should run with range (0,0) instead
-
-#targeting
 
 #============================================================================
 # Game_BaseItem
@@ -6913,7 +7095,7 @@ class Game_Action
   alias tbs_ga_clear clear
   def clear
     tbs_ga_clear
-    @tgt_pos = [0,0]
+    @tgt_pos = POS.new
     @tgt_area = [] #the cells selected
     @tgt_property = nil
   end
@@ -6924,10 +7106,10 @@ class Game_Action
   # returns the area of effect when pos is the target
   #--------------------------------------------------------------------------
   def set_target(pos)
-    @tgt_pos = [pos[0],pos[1]]
+    @tgt_pos = POS.new(*pos)
     type = @item.is_item? ? :item : :skill
-    spellRng = subject.getRange(@item.item_id,type)
-    @tgt_area = subject.genArea(POS.new(pos[0],pos[1]),spellRng)
+    spellRng = subject.get_range(@item.item_id,type)
+    @tgt_area = subject.gen_area(@tgt_pos,spellRng)
     return @tgt_area
   end
 
@@ -6936,11 +7118,8 @@ class Game_Action
   # that will be affected by the action
   #--------------------------------------------------------------------------
   def get_targeted_rel
-    return [] if @item.nil?
-    if @item.is_item?
-      return TBS.item_targeting_rel(@item.item_id)
-    end
-    return TBS.skill_targeting_rel(@item.item_id)
+    return [] unless @item
+    return item.target_rel
   end
 
   #--------------------------------------------------------------------------
@@ -6948,12 +7127,12 @@ class Game_Action
   #--------------------------------------------------------------------------
   def tbs_make_target_pos
     type = @item.is_item? ? :item : :skill
-    spellRng = subject.getRange(@item.item_id,type)
-    posList = subject.genTgt(spellRng)
+    spellRng = subject.get_range(@item.item_id,type)
+    posList = subject.gen_targets(spellRng)
     targets = {}
     for p in posList
       tgt = POS.new(p[0],p[1])
-      targets[p] = tbs_make_targets(subject.genArea(tgt,spellRng))
+      targets[p] = tbs_make_targets(subject.gen_area(tgt,spellRng))
     end
     return targets
   end
@@ -6972,11 +7151,11 @@ class Game_Action
   #--------------------------------------------------------------------------
   # new method: tbs_make_final_targets -> return the final list of battlers
   # affected by the area, like make_targets, will take into account randomness
-  # and attack times, use it to g
+  # and attack times
   #--------------------------------------------------------------------------
   def tbs_make_final_targets(area = @tgt_area)
     targets = tbs_make_targets(area)
-    targets = Array.new(item.number_of_targets) { random_target(targets) } if item.for_random?
+    targets = Array.new(item.number_of_targets) { Game_Action.random_target(targets) } if item.for_random?
     num = 1 + (attack? ? subject.atk_times_add.to_i : 0)
     targets *= num
     return targets
@@ -7001,7 +7180,7 @@ class Game_Action
   # new method: tgt_filled? -> checks if the targeted cell contains a battler or a blocking event
   #--------------------------------------------------------------------------
   def tgt_filled?
-    return $game_map.occupied_by?(@tgt_pos[0], @tgt_pos[1]) || tgt_blocking_event?
+    return $game_map.battler_at(*@tgt_pos) || tgt_blocking_event?
   end
 
   #--------------------------------------------------------------------------
@@ -7009,7 +7188,7 @@ class Game_Action
   #--------------------------------------------------------------------------
   def tgt_blocking_event?
     mr = MoveRule.new(@subject.move_rule_id)
-    return $game_map.battle_events_at(@tgt_pos[0], @tgt_pos[1]).any?{|ev| !@subject.can_cross_ev?(mr,5,ev)}
+    return $game_map.battle_events_at(*tgt_pos).any?{|ev| !@subject.can_cross_ev?(mr,5,ev)}
   end
 
   #--------------------------------------------------------------------------
@@ -7023,7 +7202,7 @@ class Game_Action
   # new method: tgt_water? -> checks if the targeted cell is water tile (or ship passable)
   #--------------------------------------------------------------------------
   def tgt_water?
-    return $game_map.ship_passable?(@tgt_pos[0], @tgt_pos[1])
+    return $game_map.ship_passable?(*@tgt_pos)
   end
 
   #--------------------------------------------------------------------------
@@ -7035,9 +7214,8 @@ class Game_Action
   # new method: get_tgt_property -> fetch the tgt_property from the database (notetags)
   #--------------------------------------------------------------------------
   def get_tgt_property
-    return nil if @item.nil?
-    return TBS.item_targeting_property(@item.item_id) if @item.is_item?
-    return TBS.skill_targeting_property(@item.item_id)
+    return nil unless @item
+    return item.target_property
   end
 
   #--------------------------------------------------------------------------
@@ -7066,7 +7244,7 @@ class Game_Action
   #--------------------------------------------------------------------------
   # new method: random_target -> given an already refined set of targets, pick a random one based on tgr
   #--------------------------------------------------------------------------
-  def random_target(targets)
+  def self.random_target(targets)
     tgr_sum = targets.inject(0) {|r, member| r + member.tgr }
     tgr_rand = rand * tgr_sum
     targets.each do |member|
@@ -7077,9 +7255,9 @@ class Game_Action
   end
 
   #--------------------------------------------------------------------------
-  # new method: call_additional_tbs_effects -> call other effects for fututre compaitiblity
+  # new method: call_additional_tbs_effects -> call other effects for fututre compatibility
   #--------------------------------------------------------------------------
-  def call_additional_tbs_effects; end
+  def call_additional_tbs_effects(targets); end
 end #Game_Action
 
 #==============================================================================
@@ -7089,9 +7267,26 @@ end #Game_Action
 #==============================================================================
 
 #==============================================================================
+# TBS 3-A: Sprite_Character_TBS
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# Sprites of each battlers and associated sprites around them
+#==============================================================================
+#   modified class:
 #
-# TBS Sprite_Character_TBS
+#   class Bitmap
+#     new method: draw_circle(radius,x0,y0,c)
 #
+#   new classes:
+#   class Sprite_Character_TBS < Sprite_Character
+#      replaces Sprite_Battler for TBS
+#   class Sprite_Team < Sprite
+#     displays a sprite under the battler's sprite to show its team alliegeance.
+#   class Sprite_Active < Sprite
+#     displays an icon over the battler's sprite to show if the battler can be played
+#   class Sprite_Turn_Number < Sprite
+#     displays a number representing the position in the turnwheel of the battler
+#   class Sprite_DamagePreview < Sprite
+#     displays a text above the affected battlers representing how much damage they might take
 #==============================================================================
 
 #============================================================================
@@ -7124,6 +7319,32 @@ class Bitmap
     end
   end
 end #Bitmap
+
+
+#==============================================================================
+# Sprite_Character_Target -> serves as a simple class to show mirrored animation
+# and avoid conflicts with changes to Sprite_Character
+#==============================================================================
+class Sprite_Character_Target < Sprite_Character
+  #--------------------------------------------------------------------------
+  # override method: setup_new_effect
+  #--------------------------------------------------------------------------
+  def setup_new_effect
+    if !animation? && @character.animation_id > 0
+      animation = $data_animations[@character.animation_id]
+      #added
+      if @character.animation_mirror
+        start_animation(animation,true)
+      else
+        start_animation(animation)
+      end
+    end
+    if !@balloon_sprite && @character.balloon_id > 0
+      @balloon_id = @character.balloon_id
+      start_balloon
+    end
+  end
+end
 
 #==============================================================================
 # Sprite_Character_TBS -> Replaces Sprite_Battler for TBS, it directly copies
@@ -7542,7 +7763,7 @@ end #Sprite_Character_TBS
 # This class displays a sprite under the battler's sprite to show its team
 # alliegeance. By default the sprite will be a circle of the team's color
 #============================================================================
-class Sprite_Team < Sprite_Base
+class Sprite_Team < Sprite
   #--------------------------------------------------------------------------
   # Constants and class variable
   #--------------------------------------------------------------------------
@@ -7618,7 +7839,7 @@ end #Sprite_Team
 # This class displays an icon over the battler's sprite to show whether the
 # battler is playable or something, see Active_icons in module TBS
 #============================================================================
-class Sprite_Active < Sprite_Base
+class Sprite_Active < Sprite
   #--------------------------------------------------------------------------
   # override method: initialize
   #--------------------------------------------------------------------------
@@ -7669,7 +7890,7 @@ end #Sprite_Active
 # This class displays a number representing the position in the turn wheel of
 # the battler
 #============================================================================
-class Sprite_Turn_Number < Sprite_Base
+class Sprite_Turn_Number < Sprite
   W = 30
   #--------------------------------------------------------------------------
   # override method: initialize
@@ -7733,7 +7954,7 @@ end # Sprite_Turn_Number
 # Displays a text above the affected battlers representing how much damage
 # they might take
 #============================================================================
-class Sprite_DamagePreview < Sprite_Base
+class Sprite_DamagePreview < Sprite
   DMG_FONT_SIZE = 16
   #--------------------------------------------------------------------------
   # override method: initialize
@@ -7808,15 +8029,29 @@ class Sprite_DamagePreview < Sprite_Base
 end # Sprite_DamagePreview
 
 #==============================================================================
+# TBS 3-B: Sprite_Range and Cursor
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# Sprites of additionnal tbs objects children of Sprite_Tile
+#==============================================================================
+#   modified class:
+#   class Sprite_AutoTile_Handler
+#     new method: refresh
 #
-# TBS Sprite_Range
-#
+#   new classes:
+#   class Sprite_Range < Sprite_Tile
+#      displays all ranges/areas during battle
+#   class Sprite_TBS_Cursor < Sprite_Tile
+#      handles the display of the cursor
 #==============================================================================
 
+
+#==============================================================================
+# TBS
+#==============================================================================
 module TBS
   #type in [:move, :attack, :skill, :help_skill]
   TBS_RANGE_TYPES = [:attack, :skill, :help_skill, :move, :place]
-  def self.spriteType(type, bIsArea = false)
+  def self.sprite_type(type, bIsArea = false)
     x = bIsArea ? TBS_RANGE_TYPES.size : 0
     i = TBS_RANGE_TYPES.index(type)
     return i ? x + i : 0
@@ -7825,7 +8060,7 @@ module TBS
   #given a sprite type, return the name of a file storing the range
   RANGE_FILES = [FILENAME::ATTACK_RANGE, FILENAME::SKILL_RANGE, FILENAME::HELP_RANGE,  FILENAME::MOVE_RANGE, FILENAME::PLACE_RANGE,
                  FILENAME::ATTACK_AREA, FILENAME::SKILL_AREA, FILENAME::HELP_AREA]
-  def self.rangePicture(type)
+  def self.range_picture(type)
     return RANGE_FILES[type]
   end
 end #TBS
@@ -7925,14 +8160,8 @@ class Sprite_AutoTile_Handler
 end #Sprite_AutoTile_Handler
 
 #==============================================================================
-#
-# TBS Sprite_TBS_Cursor
-#
+# Sprite_TBS_Cursor -> handles the display of the cursor, controls the camera
 #==============================================================================
-
-#----------------------------------------------------------------------------
-# Sprite_TBS_Cursor -> handles the display of the cursor
-#----------------------------------------------------------------------------
 class Sprite_TBS_Cursor < Sprite_Tile
   #----------------------------------------------------------------------------
   # Object initialization
@@ -7957,6 +8186,13 @@ class Sprite_TBS_Cursor < Sprite_Tile
     return if @map_x == x && @map_y == y
     @map_x = x % $game_map.width
     @map_y = y % $game_map.height
+    update_camera(x,y)
+  end
+  #----------------------------------------------------------------------------
+  # update_camera(x,y) -> updates the camera whenever the cursor is moved,
+  # should be overwritten for better camera control
+  #----------------------------------------------------------------------------
+  def update_camera(x, y)
     center(x,y)
   end
   #--------------------------------------------------------------------------
@@ -7974,25 +8210,34 @@ class Sprite_TBS_Cursor < Sprite_Tile
     self.bitmap.dispose if self.bitmap
     super
   end
-
   #--------------------------------------------------------------------------
   # override method: screen_z
   #--------------------------------------------------------------------------
   def screen_z; 101+($game_system.highlight_units ? TBS::TRANSPARENT_Z : 0); end
   #----------------------------------------------------------------------------
+  # method: cursor_position
+  #----------------------------------------------------------------------------
+  def cursor_position
+    [@cursor.real_x, @cursor.real_y]
+  end
+  #----------------------------------------------------------------------------
   # Update Process
   #----------------------------------------------------------------------------
   def update
-    moveto(@cursor.x, @cursor.y)
+    moveto(*cursor_position)
     self.visible = @cursor.active
     super
   end
 end #Sprite_TBS_Cursor
 
 #==============================================================================
-#
-# TBS Spriteset_TBS_Map
-#
+# TBS 3-C: Spriteset_TBS_Map
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# The main class dealing with sprite display
+#==============================================================================
+#   new classes:
+#   class Spriteset_TBS_Map < Spriteset_Map
+#      stores and handles every display features
 #==============================================================================
 
 #==============================================================================
@@ -8056,13 +8301,13 @@ class Spriteset_TBS_Map < Spriteset_Map
   #--------------------------------------------------------------------------
   def create_characters
     @character_sprites = []
-    for event in $game_map.tbs_events #display all tbs events
-      @character_sprites.push(Sprite_Character.new(@viewport1, event))
+    $game_map.tbs_events.each do |ev|
+      @character_sprites.push(Sprite_Character.new(@viewport1, ev))
     end
     @map_id = $game_map.map_id
     create_battler_sprites
     create_cursor
-    @tgt_sprite = Sprite_Character.new(@viewport1, Game_Character.new())
+    @tgt_sprite = Sprite_Character_Target.new(@viewport1, Game_Character.new())
   end
 
   #--------------------------------------------------------------------------
@@ -8172,15 +8417,6 @@ class Spriteset_TBS_Map < Spriteset_Map
   #--------------------------------------------------------------------------
   def get_sprite(bat)
     return @battler_sprites.find{|sprite| sprite.battler == bat}
-    #if id.nil?
-      #puts sprintf("weird call " + bat.name)
-    #  l = @battler_sprites.select{|sprite| sprite.battler.name == bat.name}
-    #  puts l.size
-    #  puts @battler_sprites.size
-    #  puts ($game_party.tbs_members + $game_troop.tbs_members + $game_troop.obstacles).size
-    #  @battler_sprites.each {|s| puts s.battler.name}
-    #end
-    #return id ? @battler_sprites[id] : nil
   end
   #--------------------------------------------------------------------------
   # * Determine if Animation is Being Displayed
@@ -8273,7 +8509,7 @@ class Spriteset_TBS_Map < Spriteset_Map
   #--------------------------------------------------------------------------
   def draw_range(range, type)
     sprites = range_sprite_list(type)
-    filename = TBS.rangePicture(type)
+    filename = TBS.range_picture(type)
     if filename && filename != ""
       sprites.push(Sprite_AutoTile_Handler.new(@viewport1,filename,range,TBS::AUTO_RANGE_FPI))
     else
@@ -8318,7 +8554,7 @@ class Spriteset_TBS_Map < Spriteset_Map
     return unless SceneManager.scene_is?(Scene_TBS_Battle)
     cursor = SceneManager.scene.tbs_cursor
     return unless cursor.active && cursor.requires_area?
-    type = TBS.spriteType(cursor.range_mode,true)
+    type = TBS.sprite_type(cursor.range_mode,true)
     draw_range(cursor.area,type)
   end
 end #Spriteset_TBS_Map
@@ -8330,9 +8566,22 @@ end #Spriteset_TBS_Map
 #==============================================================================
 
 #==============================================================================
+# TBS 4-A: Command Windows
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# The main menus in TBS
+#==============================================================================
+#   modified class:
+#   class Window_Base < Window
+#     alias method: draw_actor_class, draw_actor_face
+#     new method: relocate(dir), draw_enemy_face
 #
-# TBS Commands
-#
+#   new classes:
+#   class Window_TBS_ActorCommand < Window_ActorCommand
+#      deals with the list of commands when selecting a playable battler
+#   class Window_TBS_GlobalCommand < Window_Command
+#      deals with the list of commands when pressing ESC during TBS battle
+#   class Window_TBS_PlaceGlobalCommand < Window_TBS_GlobalCommand
+#      lists the commands specific to the place phase
 #==============================================================================
 
 #============================================================================
@@ -8357,7 +8606,32 @@ class Window_Base < Window
     change_color(normal_color)
     draw_text(x, y, width, line_height, actor.class_name)
   end
-end
+
+  #--------------------------------------------------------------------------
+  # alias method: draw_actor_face
+  #--------------------------------------------------------------------------
+  alias tbs_draw_actor_face draw_actor_face
+  def draw_actor_face(actor, x, y, enabled = true)
+    return tbs_draw_actor_face(actor, x, y, enabled) unless (TBS::DISPLAY_BAT_AS_FACE && actor.enemy? && actor.face_name == "")
+    draw_enemy_face(actor, x, y, enabled)
+  end
+
+  #--------------------------------------------------------------------------
+  # new method: draw_enemy_face -> draws the enemy sprite as face, only
+  # if DISPLAY_BAT_AS_FACE is true and enemy has no face file
+  #--------------------------------------------------------------------------
+  def draw_enemy_face(bat,x,y,enabled = true)
+    bitmap = Cache.battler(bat.battler_name,bat.battler_hue)
+    face_size = 96
+    w = face_size
+    h = face_size
+    _x = (bitmap.width-face_size) / 2
+    _y = (bitmap.height-face_size) / 2
+    rect = Rect.new(_x, _y, w, h)
+    contents.blt(x, y, bitmap, rect, enabled ? 255 : translucent_alpha)
+    bitmap.dispose
+  end
+end #Window_Base
 
 #============================================================================
 # Window_TBS_ActorCommand
@@ -8539,7 +8813,9 @@ end #Window_TBS_ActorCommand
 # Escape (if available)
 # Victory Conditions -> Victory text Menu
 # Turn Order
+# <original commands>
 # Options -> Option Menu
+# Save
 # Cancel (ESC)
 #============================================================================
 class Window_TBS_GlobalCommand < Window_Command
@@ -8628,9 +8904,23 @@ class Window_TBS_PlaceGlobalCommand < Window_TBS_GlobalCommand
 end #Window_TBS_GlobalCommand
 
 #==============================================================================
-#
-# TBS Window_Confirm
-#
+# TBS 4-B: Sub Windows
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# The windows used in tbs like submenus, confirmation windows and in-game status
+#==============================================================================
+#   new classes:
+#   class Window_Confirm < Window_HorzCommand
+#      displays a Yes/No command with text above
+#   class Window_TBS_Confirm < Window_Confirm
+#      confirms tbs actions or cancel them
+#   class Window_Small_TBS_Status < Window_Base
+#      displays a small amount of data on the battlers
+#   class Window_Full_Status < Window_Status
+#      displays a status window like vanilla but for enemies too (called by Status cmd from Window_TBS_ActorCommand)
+#   class Window_WinConditions < Window_Selectable
+#      display the victory condition text when called from Window_TBS_GlobalCommand
+#   class Window_TurnOrder < Window_Command
+#      displays unit in order in the turn wheel, called from Window_TBS_GlobalCommand
 #==============================================================================
 
 #==============================================================================
@@ -8772,12 +9062,6 @@ class Window_TBS_Confirm < Window_Confirm
     open
   end
 end #Window_TBS_Confirm
-
-#==============================================================================
-#
-# TBS Window_TBS_Status
-#
-#==============================================================================
 
 #==============================================================================
 # Window_Small_TBS_Status -> displays a small amount of data on the battlers
@@ -8996,6 +9280,7 @@ class Window_TurnOrder < Window_Command
     deactivate
     self.openness = 0
     refresh
+    @setup_over = true #because update cursor is activate during the first setup
   end
 
   #--------------------------------------------------------------------------
@@ -9055,6 +9340,21 @@ class Window_TurnOrder < Window_Command
   end
 
   #--------------------------------------------------------------------------
+  # override method: draw_enemy_face
+  #--------------------------------------------------------------------------
+  def draw_enemy_face(bat,x,y,enabled = true)
+    bitmap = Cache.battler(bat.battler_name,bat.battler_hue)
+    face_size = 96
+    w = [item_width,face_size].min
+    h = [item_height,face_size].min
+    _x = (bitmap.width - w) / 2
+    _y = (bitmap.height - h) / 2
+    rect = Rect.new(_x, _y, w, h)
+    contents.blt(x, y, bitmap, rect, enabled ? 255 : translucent_alpha)
+    bitmap.dispose
+  end
+
+  #--------------------------------------------------------------------------
   # * Draw Item
   #--------------------------------------------------------------------------
   def draw_item(index)
@@ -9063,7 +9363,8 @@ class Window_TurnOrder < Window_Command
     enabled = bat.is_active?
 
     draw_back(index,TBS::TEAMS.team_color(bat.team).dup)
-    draw_face(bat.face_name,bat.face_index,rect.x, rect.y,enabled)
+    draw_actor_face(bat,rect.x,rect.y,enabled)
+    #draw_face(bat.face_name,bat.face_index,rect.x, rect.y,enabled)
     change_color(normal_color, enabled)
     draw_text(item_rect_for_text(index), command_name(index), alignment) #draw bat name
     draw_text(item_rect_for_text(index), index+1, 2) #draw turn id
@@ -9088,6 +9389,7 @@ class Window_TurnOrder < Window_Command
   #--------------------------------------------------------------------------
   def update_cursor
     super
+    return unless @setup_over #avoid a bug when loading the battle >:(
     SceneManager.scene.tbs_cursor.moveto_bat(current_ext) if SceneManager.scene_is?(Scene_TBS_Battle) && current_symbol == :ok
   end
 end #Window_TurnOrder
@@ -9106,7 +9408,7 @@ end #Window_TurnOrder
 #   -Use action (attack, skill, item?)
 #   -Interract with environment?
 #==============================================================================
-# levels of AIs :
+# these are considered levels of AIs, the implemented one is the gtbs-like:
 # -dumb/classic (easiest to deal with): given a set of available actions,
 # pick a random one (based on probabilities like vanilla) and play it,
 # try to stay at some distance (default 1) from the player
@@ -9114,23 +9416,86 @@ end #Window_TurnOrder
 # -smartish: FSM with transition, each state represent a strategy (like gtbs)
 # -oversmartish: tries to predict next few turns
 # -custom
-###############################################
-#Tant que je peux faire une action :
-#  L = la liste d actions que je peux faire #(coût en ressources, cooldown etc.)
-#  M = la liste des cases où je peux me rendre en me déplaçant
-#  Ordonne L selon mes préférences d actions #(donc probabilité + éventuellement un état interne qui me ferait privilégier certaines actions par rapport aux autres)
-#  Pour chaque capacité c de L (ordonnée) :
-#    Je calcule la liste des cases que c peut toucher depuis ma position ou une position où je me serai déplacé #voir pb A
-#    Si cette liste contient des cibles pertinentes :
-#      Je prends la meilleure cible #(calcul propre à l ia, une meilleure cible dépendra du nombre de cibles, et d'à quel point ça avantage mon équipe, genre tuer les cibles, les affaiblir ou soigner mes alliés etc.)
-#      Je regarde où je peux atteindre cette cible #voir pb B
-#      Je me déplace vers la meilleure position qui peut atteindre ma cible #(calcul propre à l'ia, dépend de si elle veut se rapprocher ou s'éloigner, de ses déplacements restants etc.)
-#      Je lance la capacité sur la cible
-#      Je reviens au tant que
-#    Sinon:
-#      Je passe à la capacité suivante
-#  Si aucune action ne peut être faite, je regarde la meilleure position où je peux aller, j'y vais et je termine mon tour
-################################################
+#==============================================================================
+# TBS 5-A: AI Setup
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# Handles ais setup and preview damage data
+#==============================================================================
+#   modified classes:
+#   class Game_Battler < Game_BattlerBase
+#     new methods: get_ai_tactic, skill_cost_eval(formula,s,t)
+#   class Game_Actor < Game_Battler
+#     override method: get_ai_tactic
+#   class Game_Enemy < Game_Battler
+#     override method: get_ai_tactic
+#   class Scene_TBS_Battle < Scene_Base
+#     overwrite method: ai_handle_turn
+#
+#   new class:
+#   class Preview_DamageData
+#      Parse the potential results of an action, called by AIs and displayed by Sprite_DamagePreview
+#==============================================================================
+
+#==============================================================================
+# Scene_TBS_Battle
+#==============================================================================
+class Scene_TBS_Battle < Scene_Base
+  #--------------------------------------------------------------------------
+  # overwrite method: ai_handle_turn
+  #--------------------------------------------------------------------------
+  def ai_handle_turn
+    ai = AI_HandlerBase.new(self)
+    ai.decide_actions(@active_battlers)
+    next_group_turn
+  end
+end #Scene_TBS_Battle
+
+#==============================================================================
+# Game_Battler
+#==============================================================================
+class Game_Battler < Game_BattlerBase
+  #--------------------------------------------------------------------------
+  # new method: get_ai_tactic (will be overriden below)
+  #--------------------------------------------------------------------------
+  def get_ai_tactic; TBS::AI::Default; end
+  #--------------------------------------------------------------------------
+  # new method: skill_cost_eval -> returns a numeric value from evaluating formula
+  # with arguments s the skill and t the tactic object
+  #--------------------------------------------------------------------------
+  def skill_cost_eval(formula,s,t)
+    eval(formula)
+  end
+end #Game_Battler
+
+#==============================================================================
+# Game_Actor
+#==============================================================================
+class Game_Actor < Game_Battler
+  #--------------------------------------------------------------------------
+  # override method: get_ai_tactic
+  #--------------------------------------------------------------------------
+  def get_ai_tactic
+    s = states.find{|s| s.ai_tactic}
+    return s.ai_tactic if s #priority to the states tactics
+    t = actor.ai_tactic
+    return t if t #then the actor's tactic
+    return self.class.ai_tactic #else the class
+  end
+end #Game_Actor
+
+#==============================================================================
+# Game_Enemy
+#==============================================================================
+class Game_Enemy < Game_Battler
+  #--------------------------------------------------------------------------
+  # override method: get_ai_tactic
+  #--------------------------------------------------------------------------
+  def get_ai_tactic
+    s = states.find{|s| s.ai_tactic}
+    return s.ai_tactic if s #priority to the states tactics
+    return enemy.ai_tactic #else the enemy
+  end
+end #Game_Enemy
 
 #============================================================================
 # ** Preview_DamageData
@@ -9225,9 +9590,9 @@ class Preview_DamageData
     return color
   end
 
-  #to display during preview_damage
   #--------------------------------------------------------------------------
-  # method: to_str -> returns the string that will be displayed by Sprite_DamagePreview
+  # method: to_str -> returns the string that will be displayed by
+  # Sprite_DamagePreview
   #--------------------------------------------------------------------------
   def to_str
     v,t = dmg_data
@@ -9237,7 +9602,11 @@ class Preview_DamageData
     return sprintf(TBS::PREVIEW::STR::DMG_VAR,*args)
   end
 
-  #var is an integer % between -variance and +variance
+  #--------------------------------------------------------------------------
+  # method: var_chance
+  #  var is an integer % between -variance and +variance
+  # returns the probability of doing exactly var% dmg
+  #--------------------------------------------------------------------------
   #the rule is (for 0 <= k <= n) P(X = k) = (n+1-k)/(n+1)^2
   #for k < 0, P(X = k) = P(X = -k)
   #P(X = n) = 1/(n+1)^2, P(X = 0) = 1/(n+1)
@@ -9249,6 +9618,11 @@ class Preview_DamageData
     return (1 + n - var.abs) * ratio
   end
 
+  #--------------------------------------------------------------------------
+  # method: at_least_var_chance
+  #  var is an integer % between -variance and +variance
+  # returns the probability of doing at least var% dmg
+  #--------------------------------------------------------------------------
   def at_least_var_chance(var)
     n = @variance
     return 0 if var > n
@@ -9267,13 +9641,19 @@ class Preview_DamageData
     return 1 - at_least_var_chance(var.abs+1)
   end
 
-  #return the probability (between 0 and 1) of killing the target in hp)
+  #--------------------------------------------------------------------------
+  # method: damage_kill_chance -> probability (between 0 and 1) of killing
+  # the target by hp removal
+  #--------------------------------------------------------------------------
   def damage_kill_chance
     r = sub_damage_kill_chance(false)
     return r + (1-r) * @crit_rate * sub_damage_kill_chance(true)
   end
 
-
+  #--------------------------------------------------------------------------
+  # method: damage_kill_chance -> probability of killing the target by hp
+  # removal when the crit effect is set (false for non-crit, true for crit)
+  #--------------------------------------------------------------------------
   def sub_damage_kill_chance(crit = false)
     dmg = -hp_change(crit).to_f
     return 0 if dmg <= 0 #heal or no damage case
@@ -9318,67 +9698,17 @@ class Preview_DamageData
 
 end #Preview_DamageData
 
-#==============================================================================
-# Scene_TBS_Battle
-#==============================================================================
-class Scene_TBS_Battle < Scene_Base
-  #--------------------------------------------------------------------------
-  # overwrite method: ai_handle_turn
-  #--------------------------------------------------------------------------
-  def ai_handle_turn
-    ai = AI_HandlerBase.new(self)
-    ai.decide_actions(@active_battlers)
-    next_group_turn
-  end
-end #Scene_TBS_Battle
 
 #==============================================================================
-# Game_Battler
+# TBS 5-B: main AIs
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+# Gives the two main ai classes
 #==============================================================================
-class Game_Battler < Game_BattlerBase
-  #--------------------------------------------------------------------------
-  # new method: get_ai_tactic (will be overriden below)
-  #--------------------------------------------------------------------------
-  def get_ai_tactic; TBS::AI::Default; end
-  #--------------------------------------------------------------------------
-  # new method: skill_cost_eval -> returns a numeric value from evaluating formula
-  # with arguments s the skill and t the tactic object
-  #--------------------------------------------------------------------------
-  def skill_cost_eval(formula,s,t)
-    eval(formula)
-  end
-end #Game_Battler
-
+#   class AI_HandlerBase
+#      choose the order of action of each ai battler
+#   class AI_BattlerBase
+#      decides the action of a battler
 #==============================================================================
-# Game_Actor
-#==============================================================================
-class Game_Actor < Game_Battler
-  #--------------------------------------------------------------------------
-  # override method: get_ai_tactic
-  #--------------------------------------------------------------------------
-  def get_ai_tactic
-    s = @states.find{|s| TBS.state_tactic(s)}
-    return TBS.state_tactic(s) if s #priority to the states tactics
-    t = TBS.actor_tactic(@actor_id)
-    return t if t #then the actor's tactic
-    return TBS.class_tactic(@class_id) #else the class
-  end
-end #Game_Actor
-
-#==============================================================================
-# Game_Enemy
-#==============================================================================
-class Game_Enemy < Game_Battler
-  #--------------------------------------------------------------------------
-  # override method: get_ai_tactic
-  #--------------------------------------------------------------------------
-  def get_ai_tactic
-    s = @states.find{|s| TBS.state_tactic(s)}
-    return TBS.state_tactic(s) if s #priority to the states tactics
-    return TBS.enemy_tactic(@enemy_id) #else the enemy
-  end
-end #Game_Enemy
-
 
 #==============================================================================
 # AI_HandlerBase
@@ -9428,15 +9758,15 @@ class AI_BattlerBase
   end
 
   #--------------------------------------------------------------------------
-  # genTargetList
+  # gen_target_list
   #--------------------------------------------------------------------------
   # return a hash table {pos => [srcs]} such that skill may be cast on pos from any srcs
   #--------------------------------------------------------------------------
-  def genTargetList(skill)
+  def gen_target_list(skill)
     targets = {}
-    for src in @route.keys
-      l = TBS.getTargetsList(@bat,POS.new(src[0],src[1]),@spellRg)
-      for p in l
+    @route.keys.each do |src|
+      l = TBS.get_targets(@bat,POS.new(src[0],src[1]),@spellRg)
+      l.each do |p|
         targets[p] = [] unless targets[p]
         targets[p].push(src)
       end
@@ -9465,6 +9795,13 @@ class AI_BattlerBase
   end
 
   #--------------------------------------------------------------------------
+  # attack? -> if the skill is the attack of bat
+  #--------------------------------------------------------------------------
+  def attack?(skill)
+    skill == $data_skills[@bat.attack_skill_id]
+  end
+
+  #--------------------------------------------------------------------------
   # ai_move
   #--------------------------------------------------------------------------
   # Moves the battler through route (array of directions) with cost cost
@@ -9472,7 +9809,9 @@ class AI_BattlerBase
   #--------------------------------------------------------------------------
   def ai_move(route, cost, bat = @bat, scene = @@scene)
     bat.move_through_path(route,cost)
+    scene.tbs_cursor.follow_battler(bat)
     scene.wait_for_effect
+    scene.tbs_cursor.unfollow_battler
   end
 
   #--------------------------------------------------------------------------
@@ -9482,6 +9821,7 @@ class AI_BattlerBase
   #--------------------------------------------------------------------------
   def ai_cast(skill, tgt, bat = @bat, scene = @@scene)
     bat.input.set_skill(skill.id)
+    scene.tbs_cursor.moveto(*tgt)
     bat.input.set_target(tgt)
     scene.process_tbs_action(bat)
     scene.wait_for_effect
@@ -9514,6 +9854,7 @@ class AI_BattlerBase
       return unless @bat.movable? #skip battlers turn that can't play
       break unless take_action #if nothing was played, then break loop
     end
+    return unless @bat.movable? #post-checking
     #find the best position to move before the end of your turn
     reach_best_position
   end
@@ -9547,16 +9888,8 @@ class AI_BattlerBase
   # position was good (unlikely)
   #--------------------------------------------------------------------------
   def pick_cast_position(pos_list)
-    best_src = nil
-    src_rate = -1000000
-    for src in pos_list
-      r = rate_pos(src)
-      if r > src_rate
-        best_src = src
-        src_rate = r
-      end
-    end
-    return best_src #break if no source could be picked
+    return nil if pos_list.empty?
+    return pos_list.max_by{|p| rate_pos(p)}
   end
 
   #--------------------------------------------------------------------------
@@ -9568,16 +9901,8 @@ class AI_BattlerBase
     #find a good position to end your turn
     @route, @cost = @bat.calc_pos_move(@tactic.move_range)
     @route.keep_if{|key, value| (key[0] == @bat.pos.x && key[1] == @bat.pos.y) || @bat.can_occupy?(key)}
-    best_pos = nil
-    pos_rate = -1000000
-    for pos in @route.keys
-      r = rate_pos(pos,true)
-      if r > pos_rate
-        best_pos = pos
-        pos_rate = r
-      end
-    end
-    return unless best_pos
+    return if @route.empty?
+    best_pos = @route.max_by{|p,r| rate_pos(p,true)}[0]
     ai_move_best(best_pos,@bat, @@scene)
   end
 
@@ -9596,10 +9921,7 @@ class AI_BattlerBase
     #get the subroute that can be crossed in a single turn
     for d in route
       path.push_dir(d)
-      if path.cost > bat.available_mov
-        path.pop_dir
-        break
-      end
+      break path.pop_dir if path.cost > bat.available_mov
     end
     #checks if last cell is occupied
     tgt = path.dest
@@ -9691,12 +10013,12 @@ class AI_BattlerBase
     @skill_preview = {} #a hash table with Game_Battler => PreviewDamage_Data (tgt => effect to target)
     @bat.input.set_skill(skill.id)
     return 0, nil, nil unless @bat.current_action.valid?
-    @spellRg = @bat.getRange(skill.id,:skill)
-    targets = genTargetList(skill) #gets all uniq cells that can be targeted this turn
+    @spellRg = @bat.get_range(skill.id,:skill)
+    targets = gen_target_list(skill) #gets all uniq cells that can be targeted this turn
     #choose the best target if any
-    best_tgt = nil
     best_rating = 0
-    for tgt in targets.keys
+    best_tgt = nil
+    targets.keys.each do |tgt|
       @bat.input.set_target(tgt)
       next unless @bat.current_action.tbs_tgt_valid?
       r = result_rate(skill,tgt,targets,best_rating)
@@ -9730,6 +10052,7 @@ class AI_BattlerBase
     res = result_rate_effects(skill,tgt_bat)
     res *= bat_rate_importance(tgt_bat)
     res *= bat_rate_relationship(tgt_bat)
+    res *= (1 + (attack?(skill) ? @bat.atk_times_add.to_i : 0))
     res *= skill.repeats
     return @rate_preview[tgt_bat] = res
   end
@@ -9759,9 +10082,9 @@ class AI_BattlerBase
     #states
     death_s = tgt_bat.death_state_id
     added_states = prev.added_states.select{|s| s != death_s} #exclude the kill case -> done separatly
-    state_score = added_states.inject(0){|r,s| r + TBS.state_ai_rating(s) * prev.state_add_chance?(s)} #negative: bad states, ie harmful
-    state_score -= prev.removed_states.inject(0){|r,s| r + TBS.state_ai_rating(s) * prev.state_rm_chance?(s)} #negative: good states, ie harmful
-    state_score += prev.state_add_chance?(death_s) * @tactic.kill_aim * TBS.state_ai_rating(death_s) #kill should be negative as it is harmful ~
+    state_score = added_states.inject(0){|r,s| r + $data_states[s].ai_rating * prev.state_add_chance?(s)} #negative: bad states, ie harmful
+    state_score -= prev.removed_states.inject(0){|r,s| r + $data_states[s].ai_rating * prev.state_rm_chance?(s)} #negative: good states, ie harmful
+    state_score += prev.state_add_chance?(death_s) * @tactic.kill_aim * $data_states[death_s].ai_rating #kill should be negative as it is harmful ~
     #result
     res = hp_score * @tactic.hp + mp_score * @tactic.mp + state_score * @tactic.states
     #touch multiplier -> lower the score if the touch rate is low, see this as expectancy
@@ -9805,7 +10128,7 @@ class AI_BattlerBase
   # It is the sum of result_rate_bat on each affected battlers + other constraints like saving mana
   #--------------------------------------------------------------------------
   def result_rate_src(skill,tgt,src)
-    @area = TBS.getArea(@bat,POS.new(src[0],src[1]),POS.new(tgt[0],tgt[1]),@spellRg) unless @area
+    @area = TBS.get_area(@bat,POS.new(src[0],src[1]),POS.new(tgt[0],tgt[1]),@spellRg) unless @area
     old_pos = @bat.pos
     @bat.moveto(src[0],src[1]) #go to the src for the sake of the simulation
     affected_bats = @bat.input.tbs_make_targets(@area)
@@ -9832,7 +10155,7 @@ class AI_BattlerBase
   # = 0 means that the skill is basically free (except the action price)
   #--------------------------------------------------------------------------
   def skill_rate_cost(skill,tgt,src,affected_bats)
-    special_case = TBS.skill_cost_rating(skill.id)
+    special_case = skill.cost_rating
     return @bat.skill_cost_eval(special_case,skill,@tactic) if special_case
     return 1 unless skill.for_friend? || skill.for_opponent? || !affected_bats.empty? #will consider the special case non-target skills as 'good choice'
     #get mp cost in mmp% (0 if mmp == 0)
@@ -9862,15 +10185,17 @@ class AI_BattlerBase
     best_srcs = []
     best_rate = current_best_rating
     @area = nil
+    old_tgt = @@scene.last_target
+    @@scene.last_target = POS.new(*tgt) #save the target for addons
     srcList = targets_src_hash[tgt]
     if !skill_src_dependant?(skill,@spellRg.area)
       src = srcList[0]
-      @area = TBS.getArea(@bat,POS.new(src[0],src[1]),POS.new(tgt[0],tgt[1]),@spellRg)
+      @area = TBS.get_area(@bat,POS.new(src[0],src[1]),POS.new(tgt[0],tgt[1]),@spellRg)
       #case 0: in area, case 1: out of area
       srcCases = [[],[]]
       srcList.each{|s| @area.include?(s) ? srcCases[0].push(s) : srcCases[1].push(s)}
       #choose if it is better to be inside the range or out of it
-      for l in srcCases
+      for l in srcCases #2 cases
         next if l.empty?
         r = result_rate_src(skill,tgt,l[0])
         if r >= best_rate
@@ -9880,17 +10205,12 @@ class AI_BattlerBase
         end
       end
     else #skill is src dependant
-      for src in srcList
-        @area = nil #recalculate
-        r = result_rate_src(skill,tgt,src)
-        if r >= best_rate
-          best_srcs = [] if r > best_rate
-          best_srcs.push(src)
-          best_rate = r
-        end
-      end
+      data = srcList.map{|src| @area=nil; [src,result_rate_src(skill,tgt,src)]}
+      best_rate = data.max_by{|src,r| r}[1]
+      best_srcs = data.inject([]){|l,v| v[1] == best_rate ? l.push(v[0]) : l}
     end
     targets_src_hash[tgt] = best_srcs unless best_srcs.empty? #filter the sources
+    @@scene.last_target = old_tgt
     return best_rate
   end
 
